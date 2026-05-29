@@ -1,13 +1,13 @@
 import React, { useState } from "react";
 import {
-  View,
-  Text,
-  TextInput,
-  TouchableOpacity,
+  Alert,
   Image,
   ScrollView,
   StyleSheet,
-  Alert,
+  Text,
+  TextInput,
+  TouchableOpacity,
+  View,
 } from "react-native";
 import * as ImagePicker from "expo-image-picker";
 
@@ -22,30 +22,39 @@ export default function HomeScreen() {
   const [thinking, setThinking] = useState(false);
 
   async function pickImage() {
-    const permission = await ImagePicker.requestMediaLibraryPermissionsAsync();
-    if (!permission.granted) {
-      Alert.alert("Permission needed", "Please allow photo access.");
-      return;
-    }
+    try {
+      const permission = await ImagePicker.requestMediaLibraryPermissionsAsync();
 
-    const picked = await ImagePicker.launchImageLibraryAsync({
-      mediaTypes: ImagePicker.MediaTypeOptions.Images,
-      quality: 0.8,
-      base64: true,
-    });
+      if (!permission.granted) {
+        Alert.alert("Permission needed", "Please allow photo access.");
+        return;
+      }
 
-    if (!picked.canceled && picked.assets?.[0]?.base64) {
-      setImage(`data:image/jpeg;base64,${picked.assets[0].base64}`);
-      setResult(null);
-      setAnalysis("");
+      const picked = await ImagePicker.launchImageLibraryAsync({
+        mediaTypes: ImagePicker.MediaTypeOptions.Images,
+        quality: 0.7,
+        base64: true,
+      });
+
+      if (!picked.canceled && picked.assets?.[0]?.base64) {
+        setImage(`data:image/jpeg;base64,${picked.assets[0].base64}`);
+        setResult(null);
+        setAnalysis("");
+      }
+    } catch (e: any) {
+      Alert.alert("Image failed", e.message || "Could not open photos.");
     }
   }
 
   async function analyseImage() {
-    if (!image) return Alert.alert("No image", "Import an image first.");
+    if (!image) {
+      Alert.alert("No image", "Import an image first.");
+      return;
+    }
 
     try {
       setThinking(true);
+
       const res = await fetch(`${API_URL}/api/brain`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -53,7 +62,10 @@ export default function HomeScreen() {
       });
 
       const data = await res.json();
-      if (!res.ok || !data.ok) throw new Error(data.detail || data.error);
+
+      if (!res.ok || !data.ok) {
+        throw new Error(data.detail || data.error || "Analysis failed");
+      }
 
       setAnalysis(data.analysis || "");
     } catch (e: any) {
@@ -64,10 +76,14 @@ export default function HomeScreen() {
   }
 
   async function renderImage() {
-    if (!image) return Alert.alert("No image", "Import an image first.");
+    if (!image) {
+      Alert.alert("No image", "Import an image first.");
+      return;
+    }
 
     try {
       setLoading(true);
+
       const res = await fetch(`${API_URL}/api/render`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -75,7 +91,10 @@ export default function HomeScreen() {
       });
 
       const data = await res.json();
-      if (!res.ok || !data.ok) throw new Error(data.detail || data.error);
+
+      if (!res.ok || !data.ok) {
+        throw new Error(data.detail || data.error || "Render failed");
+      }
 
       setResult(`data:image/png;base64,${data.imageBase64}`);
     } catch (e: any) {
@@ -88,9 +107,6 @@ export default function HomeScreen() {
   return (
     <ScrollView style={styles.page} contentContainerStyle={styles.content}>
       <View style={styles.logoWrap}>
-        <View style={styles.logoCircle}>
-          <Text style={styles.logoIcon}>⌂</Text>
-        </View>
         <Text style={styles.logoText}>MONOCULAR</Text>
         <Text style={styles.logoSub}>RATIONAL ARCHITECTURAL INTELLIGENCE</Text>
       </View>
@@ -116,9 +132,6 @@ export default function HomeScreen() {
         ) : (
           <View style={styles.previewPlaceholder}>
             <Text style={styles.previewTitle}>IMAGE PREVIEW</Text>
-            <Text style={styles.previewText}>
-              Upload sketches, drawings, elevations or renders.
-            </Text>
           </View>
         )}
 
@@ -153,27 +166,24 @@ export default function HomeScreen() {
 }
 
 const styles = StyleSheet.create({
-  page: { flex: 1, backgroundColor: "#07090d" },
-  content: { padding: 22, paddingBottom: 60 },
-
-  logoWrap: { alignItems: "center", marginTop: 28, marginBottom: 24 },
-  logoCircle: {
-    width: 74,
-    height: 74,
-    borderRadius: 37,
-    borderWidth: 2,
-    borderColor: "#b9c99c",
-    alignItems: "center",
-    justifyContent: "center",
-    backgroundColor: "#11151a",
+  page: {
+    flex: 1,
+    backgroundColor: "#07090d",
   },
-  logoIcon: { color: "white", fontSize: 42, fontWeight: "900" },
+  content: {
+    padding: 22,
+    paddingBottom: 60,
+  },
+  logoWrap: {
+    alignItems: "center",
+    marginTop: 32,
+    marginBottom: 24,
+  },
   logoText: {
     color: "white",
     fontSize: 34,
     fontWeight: "900",
     letterSpacing: 5,
-    marginTop: 14,
   },
   logoSub: {
     color: "#b9c99c",
@@ -182,7 +192,6 @@ const styles = StyleSheet.create({
     letterSpacing: 2,
     marginTop: 6,
   },
-
   card: {
     borderWidth: 1,
     borderColor: "#283241",
@@ -228,17 +237,13 @@ const styles = StyleSheet.create({
     backgroundColor: "#0f141a",
     alignItems: "center",
     justifyContent: "center",
-    borderWidth: 1,
-    borderColor: "#303b47",
   },
   previewTitle: {
     color: "white",
     fontSize: 18,
     fontWeight: "900",
     letterSpacing: 2,
-    marginBottom: 10,
   },
-  previewText: { color: "#b8b8b8", fontSize: 15, textAlign: "center" },
   brainButton: {
     backgroundColor: "#101b10",
     paddingVertical: 20,
@@ -265,7 +270,11 @@ const styles = StyleSheet.create({
     fontWeight: "900",
     marginBottom: 10,
   },
-  analysisText: { color: "#d8dde8", fontSize: 14, lineHeight: 21 },
+  analysisText: {
+    color: "#d8dde8",
+    fontSize: 14,
+    lineHeight: 21,
+  },
   renderButton: {
     backgroundColor: "#3f604f",
     paddingVertical: 22,
@@ -279,7 +288,9 @@ const styles = StyleSheet.create({
     letterSpacing: 2,
     textAlign: "center",
   },
-  resultWrap: { marginTop: 24 },
+  resultWrap: {
+    marginTop: 24,
+  },
   resultTitle: {
     color: "white",
     fontSize: 18,
