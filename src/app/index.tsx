@@ -1,4 +1,4 @@
-import React, { useRef, useState } from "react";
+import React, { useState } from "react";
 import {
   View,
   Text,
@@ -7,9 +7,11 @@ import {
   Image,
   ScrollView,
   StyleSheet,
+  Alert,
 } from "react-native";
+import * as ImagePicker from "expo-image-picker";
 
-const API_URL = "http://localhost:4242";
+const API_URL = "https://monocular-server.onrender.com";
 
 export default function HomeScreen() {
   const [prompt, setPrompt] = useState("");
@@ -19,129 +21,88 @@ export default function HomeScreen() {
   const [loading, setLoading] = useState(false);
   const [thinking, setThinking] = useState(false);
 
-  const fileInputRef = useRef<HTMLInputElement | null>(null);
-
-  function pickImage() {
-    fileInputRef.current?.click();
-  }
-
-  function handleFileChange(event: any) {
-    const file = event.target.files?.[0];
-    if (!file) return;
-
-    const reader = new FileReader();
-
-    reader.onload = () => {
-      setImage(String(reader.result));
-      setResult(null);
-      setAnalysis("");
-    };
-
-    reader.readAsDataURL(file);
-  }
-
-  async function analyseImage() {
-    if (!image) {
-      alert("Import an image first");
+  async function pickImage() {
+    const permission = await ImagePicker.requestMediaLibraryPermissionsAsync();
+    if (!permission.granted) {
+      Alert.alert("Permission needed", "Please allow photo access.");
       return;
     }
 
-    setThinking(true);
+    const picked = await ImagePicker.launchImageLibraryAsync({
+      mediaTypes: ImagePicker.MediaTypeOptions.Images,
+      quality: 0.8,
+      base64: true,
+    });
+
+    if (!picked.canceled && picked.assets?.[0]?.base64) {
+      setImage(`data:image/jpeg;base64,${picked.assets[0].base64}`);
+      setResult(null);
+      setAnalysis("");
+    }
+  }
+
+  async function analyseImage() {
+    if (!image) return Alert.alert("No image", "Import an image first.");
 
     try {
-      const response = await fetch(`${API_URL}/api/brain`, {
+      setThinking(true);
+      const res = await fetch(`${API_URL}/api/brain`, {
         method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify({
-          prompt,
-          imageBase64: image,
-        }),
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ prompt, imageBase64: image }),
       });
 
-      const data = await response.json();
-
-      if (!response.ok) {
-        alert(data.detail || data.error || "Brain failed");
-        return;
-      }
+      const data = await res.json();
+      if (!res.ok || !data.ok) throw new Error(data.detail || data.error);
 
       setAnalysis(data.analysis || "");
-    } catch (error: any) {
-      alert("Server connection failed: " + error.message);
+    } catch (e: any) {
+      Alert.alert("Server connection failed", e.message || "Analysis failed");
     } finally {
       setThinking(false);
     }
   }
 
   async function renderImage() {
-    if (!image) {
-      alert("Import an image first");
-      return;
-    }
-
-    setLoading(true);
-    setResult(null);
+    if (!image) return Alert.alert("No image", "Import an image first.");
 
     try {
-      const response = await fetch(`${API_URL}/api/render`, {
+      setLoading(true);
+      const res = await fetch(`${API_URL}/api/render`, {
         method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify({
-          prompt,
-          imageBase64: image,
-        }),
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ prompt, imageBase64: image }),
       });
 
-      const data = await response.json();
-
-      if (!response.ok || !data.imageBase64) {
-        alert(data.detail || data.error || "Render failed");
-        return;
-      }
+      const data = await res.json();
+      if (!res.ok || !data.ok) throw new Error(data.detail || data.error);
 
       setResult(`data:image/png;base64,${data.imageBase64}`);
-    } catch (error: any) {
-      alert("Server connection failed: " + error.message);
+    } catch (e: any) {
+      Alert.alert("Server connection failed", e.message || "Render failed");
     } finally {
       setLoading(false);
     }
   }
 
   return (
-    <ScrollView style={styles.container} contentContainerStyle={styles.content}>
-      <input
-        ref={fileInputRef}
-        type="file"
-        accept="image/png,image/jpeg,image/jpg,image/webp"
-        onChange={handleFileChange}
-        style={{ display: "none" }}
-      />
-
-      <View style={styles.header}>
-        <TouchableOpacity onPress={renderImage}>
-          <View style={styles.logoCircle}>
-            <Text style={styles.logoSymbol}>⌂</Text>
-          </View>
-        </TouchableOpacity>
-
-        <Text style={styles.title}>MONOCULAR</Text>
-        <Text style={styles.subtitle}>
-          RATIONAL ARCHITECTURAL INTELLIGENCE
-        </Text>
+    <ScrollView style={styles.page} contentContainerStyle={styles.content}>
+      <View style={styles.logoWrap}>
+        <View style={styles.logoCircle}>
+          <Text style={styles.logoIcon}>⌂</Text>
+        </View>
+        <Text style={styles.logoText}>MONOCULAR</Text>
+        <Text style={styles.logoSub}>RATIONAL ARCHITECTURAL INTELLIGENCE</Text>
       </View>
 
-      <View style={styles.panel}>
+      <View style={styles.card}>
         <TextInput
+          style={styles.input}
           placeholder="Describe your architectural render..."
-          placeholderTextColor="#8b949e"
+          placeholderTextColor="#9aa3b2"
           value={prompt}
           onChangeText={setPrompt}
           multiline
-          style={styles.input}
         />
 
         <TouchableOpacity style={styles.uploadButton} onPress={pickImage}>
@@ -192,178 +153,143 @@ export default function HomeScreen() {
 }
 
 const styles = StyleSheet.create({
-  container: {
-    flex: 1,
-    backgroundColor: "#090d0f",
-  },
+  page: { flex: 1, backgroundColor: "#07090d" },
+  content: { padding: 22, paddingBottom: 60 },
 
-  content: {
-    paddingBottom: 80,
-  },
-
-  header: {
-    alignItems: "center",
-    paddingTop: 70,
-    paddingBottom: 30,
-  },
-
+  logoWrap: { alignItems: "center", marginTop: 28, marginBottom: 24 },
   logoCircle: {
-    width: 96,
-    height: 96,
-    borderRadius: 48,
-    backgroundColor: "#111816",
-    borderWidth: 3,
-    borderColor: "#a9bc82",
+    width: 74,
+    height: 74,
+    borderRadius: 37,
+    borderWidth: 2,
+    borderColor: "#b9c99c",
     alignItems: "center",
     justifyContent: "center",
-    marginBottom: 20,
+    backgroundColor: "#11151a",
   },
-
-  logoSymbol: {
+  logoIcon: { color: "white", fontSize: 42, fontWeight: "900" },
+  logoText: {
     color: "white",
-    fontSize: 48,
+    fontSize: 34,
     fontWeight: "900",
+    letterSpacing: 5,
+    marginTop: 14,
   },
-
-  title: {
-    color: "white",
-    fontSize: 42,
-    fontWeight: "900",
-    letterSpacing: 4,
-  },
-
-  subtitle: {
-    color: "#aab2bd",
-    marginTop: 8,
-    fontSize: 13,
-    letterSpacing: 2,
-  },
-
-  panel: {
-    marginHorizontal: 24,
-    backgroundColor: "#161b22",
-    borderRadius: 28,
-    padding: 24,
-    marginBottom: 40,
-    borderWidth: 1,
-    borderColor: "rgba(185, 201, 156, 0.22)",
-  },
-
-  input: {
-    backgroundColor: "#0f141a",
-    color: "white",
-    borderRadius: 20,
-    padding: 20,
-    minHeight: 140,
-    fontSize: 18,
-    marginBottom: 20,
-  },
-
-  uploadButton: {
-    backgroundColor: "#28343f",
-    borderRadius: 18,
-    paddingVertical: 18,
-    alignItems: "center",
-    marginBottom: 20,
-  },
-
-  uploadText: {
-    color: "white",
+  logoSub: {
+    color: "#b9c99c",
+    fontSize: 11,
     fontWeight: "800",
-    letterSpacing: 1,
+    letterSpacing: 2,
+    marginTop: 6,
   },
 
-  preview: {
-    width: "100%",
-    height: 320,
-    borderRadius: 24,
-    marginBottom: 20,
+  card: {
+    borderWidth: 1,
+    borderColor: "#283241",
+    backgroundColor: "#0b0f16",
+    borderRadius: 28,
+    padding: 18,
   },
-
-  previewPlaceholder: {
-    width: "100%",
-    height: 320,
-    borderRadius: 24,
-    marginBottom: 20,
-    backgroundColor: "#0f141a",
-    alignItems: "center",
-    justifyContent: "center",
-  },
-
-  previewTitle: {
+  input: {
+    minHeight: 110,
+    backgroundColor: "#0f1522",
+    borderRadius: 22,
+    padding: 18,
     color: "white",
-    fontSize: 22,
-    fontWeight: "900",
-    marginBottom: 10,
-  },
-
-  previewText: {
-    color: "#8b949e",
-    textAlign: "center",
     fontSize: 16,
+    textAlignVertical: "top",
+    marginBottom: 18,
   },
-
-  brainButton: {
-    backgroundColor: "#20291f",
-    borderRadius: 18,
+  uploadButton: {
+    backgroundColor: "#1d2a3b",
     paddingVertical: 18,
+    borderRadius: 22,
     alignItems: "center",
     marginBottom: 18,
   },
-
-  brainText: {
-    color: "#d7e6bd",
+  uploadText: {
+    color: "white",
+    fontSize: 14,
     fontWeight: "900",
     letterSpacing: 1,
+    textAlign: "center",
   },
-
-  analysisBox: {
-    backgroundColor: "#0f141a",
-    borderRadius: 20,
-    padding: 18,
+  preview: {
+    width: "100%",
+    height: 220,
+    borderRadius: 24,
     marginBottom: 20,
   },
-
-  analysisTitle: {
-    color: "#d7e6bd",
-    fontWeight: "900",
-    marginBottom: 10,
-  },
-
-  analysisText: {
-    color: "#dce3d8",
-    lineHeight: 24,
-  },
-
-  renderButton: {
-    backgroundColor: "#4b8b73",
-    borderRadius: 20,
-    paddingVertical: 20,
+  previewPlaceholder: {
+    width: "100%",
+    height: 160,
+    borderRadius: 24,
+    marginBottom: 20,
+    backgroundColor: "#0f141a",
     alignItems: "center",
+    justifyContent: "center",
+    borderWidth: 1,
+    borderColor: "#303b47",
   },
-
-  renderText: {
+  previewTitle: {
     color: "white",
     fontSize: 18,
     fontWeight: "900",
-    letterSpacing: 1,
+    letterSpacing: 2,
+    marginBottom: 10,
   },
-
-  resultWrap: {
-    marginTop: 24,
+  previewText: { color: "#b8b8b8", fontSize: 15, textAlign: "center" },
+  brainButton: {
+    backgroundColor: "#101b10",
+    paddingVertical: 20,
+    borderRadius: 22,
+    alignItems: "center",
+    marginBottom: 18,
   },
-
-  resultTitle: {
+  brainText: {
+    color: "#c3d4aa",
+    fontSize: 15,
+    fontWeight: "900",
+    letterSpacing: 1.5,
+    textAlign: "center",
+  },
+  analysisBox: {
+    backgroundColor: "#101522",
+    borderRadius: 20,
+    padding: 18,
+    marginBottom: 18,
+  },
+  analysisTitle: {
+    color: "white",
+    fontSize: 18,
+    fontWeight: "900",
+    marginBottom: 10,
+  },
+  analysisText: { color: "#d8dde8", fontSize: 14, lineHeight: 21 },
+  renderButton: {
+    backgroundColor: "#3f604f",
+    paddingVertical: 22,
+    borderRadius: 24,
+    alignItems: "center",
+  },
+  renderText: {
     color: "white",
     fontSize: 20,
     fontWeight: "900",
-    marginBottom: 12,
+    letterSpacing: 2,
     textAlign: "center",
   },
-
+  resultWrap: { marginTop: 24 },
+  resultTitle: {
+    color: "white",
+    fontSize: 18,
+    fontWeight: "900",
+    textAlign: "center",
+    marginBottom: 12,
+  },
   resultImage: {
     width: "100%",
-    height: 420,
+    height: 240,
     borderRadius: 24,
   },
 });

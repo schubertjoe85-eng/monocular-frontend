@@ -1,44 +1,28 @@
 {
   "expo": {
-    "name": "monocular-new",
+    "name": "Monocular",
     "slug": "monocular-new",
-    "version": "1.0.0",
+    "version": "1.0.2",
     "orientation": "portrait",
-    "icon": "./assets/images/icon.png",
-    "scheme": "monocularnew",
-    "userInterfaceStyle": "automatic",
+    "platforms": [
+      "ios"
+    ],
     "ios": {
-      "icon": "./assets/expo.icon"
-    },
-    "android": {
-      "adaptiveIcon": {
-        "backgroundColor": "#E6F4FE",
-        "foregroundImage": "./assets/images/android-icon-foreground.png",
-        "backgroundImage": "./assets/images/android-icon-background.png",
-        "monochromeImage": "./assets/images/android-icon-monochrome.png"
-      },
-      "predictiveBackGestureEnabled": false
-    },
-    "web": {
-      "output": "static",
-      "favicon": "./assets/images/favicon.png"
+      "bundleIdentifier": "com.schubertjoe.monocular",
+      "buildNumber": "5",
+      "infoPlist": {
+        "NSPhotoLibraryUsageDescription": "Monocular needs photo access so you can upload drawings and images for architectural rendering.",
+        "NSCameraUsageDescription": "Monocular may use the camera to import architectural images.",
+        "ITSAppUsesNonExemptEncryption": false
+      }
     },
     "plugins": [
-      "expo-router",
-      [
-        "expo-splash-screen",
-        {
-          "backgroundColor": "#208AEF",
-          "android": {
-            "image": "./assets/images/splash-icon.png",
-            "imageWidth": 76
-          }
-        }
-      ]
+      "expo-image-picker"
     ],
-    "experiments": {
-      "typedRoutes": true,
-      "reactCompiler": true
+    "extra": {
+      "eas": {
+        "projectId": "22820e26-5fe3-4d85-aca4-8c15aecd3f5f"
+      }
     }
   }
 }
