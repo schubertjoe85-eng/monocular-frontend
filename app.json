@@ -3,25 +3,22 @@
     "name": "Monocular",
     "slug": "monocular",
     "version": "1.0.0",
-    "orientation": "portrait",
-    "platforms": [
-      "ios",
-      "android",
-      "web"
-    ],
+
     "assetBundlePatterns": [
       "**/*"
     ],
+
+    "plugins": [
+      [
+        "expo-image-picker",
+        {
+          "photosPermission": "Monocular needs access to your photos so you can upload drawings and images for rendering."
+        }
+      ]
+    ],
+
     "ios": {
       "supportsTablet": true
-    },
-    "android": {
-      "adaptiveIcon": {
-        "backgroundColor": "#556B2F"
-      }
-    },
-    "web": {
-      "bundler": "metro"
     }
   }
 }
