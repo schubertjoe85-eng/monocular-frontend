@@ -3,12 +3,18 @@
     "name": "Monocular",
     "slug": "monocular",
     "version": "1.0.0",
-
+    "orientation": "portrait",
+    "scheme": "monocular",
+    "platforms": [
+      "ios",
+      "android",
+      "web"
+    ],
     "assetBundlePatterns": [
       "**/*"
     ],
-
     "plugins": [
+      "expo-router",
       [
         "expo-image-picker",
         {
@@ -16,9 +22,17 @@
         }
       ]
     ],
-
     "ios": {
-      "supportsTablet": true
+      "supportsTablet": true,
+      "bundleIdentifier": "com.schubertjoe.monocular"
+    },
+    "android": {
+      "adaptiveIcon": {
+        "backgroundColor": "#556B2F"
+      }
+    },
+    "web": {
+      "bundler": "metro"
     }
   }
 }
