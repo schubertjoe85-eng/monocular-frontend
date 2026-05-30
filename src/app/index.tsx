@@ -231,4 +231,4 @@ const styles = StyleSheet.create({
     fontSize: 16,
     textAlignVertical: "top",
   },
-});open -a TextEdit ./server.js
+});
