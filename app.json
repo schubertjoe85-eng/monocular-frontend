@@ -2,27 +2,18 @@
   "expo": {
     "name": "Monocular",
     "slug": "monocular-new",
-    "version": "1.0.2",
+    "version": "1.0.4",
     "orientation": "portrait",
-    "platforms": [
-      "ios"
-    ],
+    "userInterfaceStyle": "dark",
+    "platforms": ["ios"],
     "ios": {
       "bundleIdentifier": "com.schubertjoe.monocular",
-      "buildNumber": "5",
+      "buildNumber": "8",
       "infoPlist": {
         "NSPhotoLibraryUsageDescription": "Monocular needs photo access so you can upload drawings and images for architectural rendering.",
-        "NSCameraUsageDescription": "Monocular may use the camera to import architectural images.",
-        "ITSAppUsesNonExemptEncryption": false
+        "NSCameraUsageDescription": "Monocular may use the camera to import architectural images."
       }
     },
-    "plugins": [
-      "expo-image-picker"
-    ],
-    "extra": {
-      "eas": {
-        "projectId": "22820e26-5fe3-4d85-aca4-8c15aecd3f5f"
-      }
-    }
+    "plugins": ["expo-image-picker"]
   }
 }
