@@ -1,0 +1,76 @@
+<!doctype html>
+<html>
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Monocular</title>
+</head>
+<body style="margin:0;background:#0F120D;color:white;font-family:Arial;text-align:center;padding:30px;">
+  <h1 style="font-size:44px;">MONOCULAR</h1>
+  <p style="color:#C9894B;font-size:20px;font-weight:bold;">Architectural rendering, refined.</p>
+
+  <div style="max-width:760px;margin:30px auto;background:#171B16;border:1px solid #6E8B3D;border-radius:24px;padding:24px;">
+    <input id="file" type="file" accept="image/*" style="color:white;width:100%;margin-bottom:20px;">
+    <img id="preview" style="display:none;width:100%;max-height:420px;object-fit:contain;border-radius:20px;margin-bottom:20px;">
+
+    <textarea id="prompt" placeholder="Describe materials, light, landscape, atmosphere..." style="width:100%;height:150px;border-radius:16px;padding:16px;font-size:16px;box-sizing:border-box;background:#10110F;color:white;"></textarea>
+
+    <button onclick="renderImage()" style="width:100%;margin-top:20px;padding:18px;border-radius:18px;border:0;background:#C9894B;color:white;font-size:18px;font-weight:bold;">RENDER</button>
+
+    <p id="msg"></p>
+    <img id="result" style="display:none;width:100%;border-radius:20px;margin-top:20px;">
+  </div>
+
+<script>
+const API_URL = "https://monocular-server.onrender.com";
+let imageBase64 = "";
+
+document.getElementById("file").addEventListener("change", function(e) {
+  const file = e.target.files[0];
+  if (!file) return;
+
+  const reader = new FileReader();
+  reader.onload = function() {
+    const dataUrl = reader.result;
+    imageBase64 = dataUrl.split(",")[1];
+
+    const preview = document.getElementById("preview");
+    preview.src = dataUrl;
+    preview.style.display = "block";
+
+    document.getElementById("msg").innerText = "Image loaded.";
+  };
+  reader.readAsDataURL(file);
+});
+
+async function renderImage() {
+  const prompt = document.getElementById("prompt").value;
+  const msg = document.getElementById("msg");
+  const result = document.getElementById("result");
+
+  msg.innerText = "Rendering...";
+  result.style.display = "none";
+
+  try {
+    const response = await fetch(API_URL + "/render", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ prompt, imageBase64 })
+    });
+
+    const data = await response.json();
+
+    if (data.image) {
+      result.src = data.image;
+      result.style.display = "block";
+      msg.innerText = "Render complete.";
+    } else {
+      msg.innerText = data.error || "Render failed.";
+    }
+  } catch (err) {
+    msg.innerText = "Server connection failed.";
+  }
+}
+</script>
+</body>
+</html>
