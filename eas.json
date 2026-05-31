@@ -1,9 +1,4 @@
-"production": {
-  "autoIncrement": true,
-  "ios": {
-    "image": "latest"
-  }
-}{
+{
   "cli": {
     "version": ">= 20.0.0",
     "appVersionSource": "remote"
@@ -17,7 +12,10 @@
       "distribution": "internal"
     },
     "production": {
-      "autoIncrement": true
+      "autoIncrement": true,
+      "ios": {
+        "image": "latest"
+      }
     }
   },
   "submit": {
