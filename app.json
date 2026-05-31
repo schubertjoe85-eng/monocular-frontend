@@ -1,4 +1,11 @@
-{
+"ios": {
+  "bundleIdentifier": "com.schubertjoe.monocular",
+  "infoPlist": {
+    "ITSAppUsesNonExemptEncryption": false,
+    "NSPhotoLibraryUsageDescription": "Monocular needs photo access so you can import images.",
+    "NSPhotoLibraryAddUsageDescription": "Monocular needs permission to save rendered images."
+  }
+},{
   "expo": {
     "name": "Monocular",
     "slug": "monocular",
