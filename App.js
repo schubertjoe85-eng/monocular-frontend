@@ -22,23 +22,18 @@ export default function App() {
   const [message, setMessage] = useState("");
 
   async function pickImage() {
-    try {
-      const result = await ImagePicker.launchImageLibraryAsync({
-        mediaTypes: ["images"],
-        quality: 0.8,
-        base64: true,
-      });
+    const result = await ImagePicker.launchImageLibraryAsync({
+      mediaTypes: ImagePicker.MediaTypeOptions.Images,
+      quality: 0.8,
+      base64: true,
+    });
 
-      if (!result.canceled && result.assets && result.assets.length > 0) {
-        const asset = result.assets[0];
-
-        setSelectedImage(asset.uri);
-        setImageBase64(asset.base64 || null);
-        setResultImage(null);
-        setMessage("Image loaded.");
-      }
-    } catch (err) {
-      setMessage("Image upload failed.");
+    if (!result.canceled && result.assets?.length) {
+      const asset = result.assets[0];
+      setSelectedImage(asset.uri);
+      setImageBase64(asset.base64 || null);
+      setResultImage(null);
+      setMessage("Image loaded.");
     }
   }
 
@@ -53,19 +48,13 @@ export default function App() {
       setMessage("Rendering...");
       setResultImage(null);
 
-      const response = await fetch(`${API_URL}/render`, {
+      const res = await fetch(`${API_URL}/render`, {
         method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify({
-          prompt,
-          imageBase64,
-          mode: "render",
-        }),
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ prompt, imageBase64, mode: "render" }),
       });
 
-      const data = await response.json();
+      const data = await res.json();
 
       if (data.image) {
         setResultImage(data.image);
@@ -73,7 +62,7 @@ export default function App() {
       } else {
         setMessage(data.error || "Render failed.");
       }
-    } catch (err) {
+    } catch {
       setMessage("Server connection failed.");
     } finally {
       setLoading(false);
@@ -82,11 +71,13 @@ export default function App() {
 
   return (
     <ScrollView style={styles.page} contentContainerStyle={styles.content}>
-      <Text style={styles.brand}>MONOCULAR</Text>
+      <LogoMark />
 
-      <Text style={styles.subtitle}>
-        Rational Architectural Visualisation
+      <Text numberOfLines={1} adjustsFontSizeToFit style={styles.title}>
+        MONOCULAR
       </Text>
+
+      <Text style={styles.subtitle}>Rational Architectural Visualisation</Text>
 
       <View style={styles.card}>
         <Text style={styles.label}>IMAGE / DRAWING</Text>
@@ -98,11 +89,7 @@ export default function App() {
         </TouchableOpacity>
 
         {selectedImage ? (
-          <Image
-            source={{ uri: selectedImage }}
-            style={styles.previewImage}
-            resizeMode="cover"
-          />
+          <Image source={{ uri: selectedImage }} style={styles.previewImage} />
         ) : null}
 
         <Text style={styles.label}>PROJECT BRIEF</Text>
@@ -110,14 +97,14 @@ export default function App() {
         <TextInput
           style={styles.input}
           placeholder="Describe materials, light, landscape, atmosphere..."
-          placeholderTextColor="#777"
+          placeholderTextColor="#8FA08A"
           multiline
           value={prompt}
           onChangeText={setPrompt}
         />
 
         <TouchableOpacity
-          style={[styles.renderButton, loading ? styles.disabled : null]}
+          style={[styles.renderButton, loading && styles.disabled]}
           onPress={renderImage}
           disabled={loading}
         >
@@ -137,90 +124,149 @@ export default function App() {
       {resultImage ? (
         <View style={styles.resultContainer}>
           <Text style={styles.resultTitle}>RESULT</Text>
-
-          <Image
-            source={{ uri: resultImage }}
-            style={styles.resultImage}
-            resizeMode="cover"
-          />
+          <Image source={{ uri: resultImage }} style={styles.resultImage} />
         </View>
       ) : null}
     </ScrollView>
   );
 }
 
+function LogoMark() {
+  return (
+    <View style={styles.logoBox}>
+      <View style={styles.logoCircle} />
+      <View style={styles.logoLineVertical} />
+      <View style={styles.logoLineHorizontal} />
+      <View style={styles.logoDiagOne} />
+      <View style={styles.logoDiagTwo} />
+    </View>
+  );
+}
+
 const styles = StyleSheet.create({
   page: {
     flex: 1,
-    backgroundColor: "#0F120D",
+    backgroundColor: "#07110B",
   },
   content: {
     padding: 24,
-    paddingTop: 56,
-    paddingBottom: 80,
+    paddingTop: 54,
+    paddingBottom: 90,
   },
-  brand: {
+  logoBox: {
+    width: 104,
+    height: 104,
+    borderWidth: 2,
+    borderColor: "#6FA342",
+    borderRadius: 28,
+    alignSelf: "center",
+    marginBottom: 26,
+    overflow: "hidden",
+  },
+  logoCircle: {
+    position: "absolute",
+    width: 62,
+    height: 62,
+    borderRadius: 31,
+    borderWidth: 2,
+    borderColor: "#6FA342",
+    top: 20,
+    left: 20,
+  },
+  logoLineVertical: {
+    position: "absolute",
+    width: 2,
+    height: "100%",
+    backgroundColor: "#6FA342",
+    left: 51,
+  },
+  logoLineHorizontal: {
+    position: "absolute",
+    height: 2,
+    width: "100%",
+    backgroundColor: "#6FA342",
+    top: 51,
+  },
+  logoDiagOne: {
+    position: "absolute",
+    width: 150,
+    height: 2,
+    backgroundColor: "#6FA342",
+    transform: [{ rotate: "45deg" }],
+    top: 51,
+    left: -24,
+  },
+  logoDiagTwo: {
+    position: "absolute",
+    width: 150,
+    height: 2,
+    backgroundColor: "#6FA342",
+    transform: [{ rotate: "-45deg" }],
+    top: 51,
+    left: -24,
+  },
+  title: {
     color: "#FFFFFF",
-    fontSize: 42,
-    fontWeight: "900",
     textAlign: "center",
-    letterSpacing: 2,
-    marginBottom: 12,
-  },
-  subtitle: {
-    color: "#D8A04D",
-    textAlign: "center",
-    fontSize: 18,
-    fontWeight: "800",
-    marginBottom: 30,
-  },
-  card: {
-    backgroundColor: "#171B16",
-    borderRadius: 24,
-    padding: 20,
-    borderWidth: 1,
-    borderColor: "#7A8F4A",
-  },
-  label: {
-    color: "#D8A04D",
-    fontSize: 13,
+    fontSize: 48,
     fontWeight: "900",
     letterSpacing: 1,
-    marginBottom: 10,
+    marginBottom: 20,
+  },
+  subtitle: {
+    color: "#79A94A",
+    textAlign: "center",
+    fontSize: 24,
+    fontWeight: "900",
+    marginBottom: 34,
+  },
+  card: {
+    backgroundColor: "#0D1A10",
+    borderRadius: 28,
+    padding: 22,
+    borderWidth: 2,
+    borderColor: "#6FA342",
+  },
+  label: {
+    color: "#79A94A",
+    fontSize: 15,
+    fontWeight: "900",
+    letterSpacing: 2,
+    marginBottom: 12,
     marginTop: 6,
   },
   uploadButton: {
-    backgroundColor: "#6E8B3D",
-    borderRadius: 18,
-    padding: 18,
-    marginBottom: 20,
+    backgroundColor: "#6F933D",
+    borderRadius: 22,
+    padding: 20,
+    marginBottom: 24,
   },
   previewImage: {
     width: "100%",
     height: 300,
-    borderRadius: 20,
-    marginBottom: 20,
-    backgroundColor: "#0F120D",
+    borderRadius: 22,
+    marginBottom: 24,
+    backgroundColor: "#07110B",
   },
   input: {
-    backgroundColor: "#10110F",
+    backgroundColor: "#07110B",
     color: "#FFFFFF",
-    minHeight: 160,
-    borderRadius: 18,
-    padding: 16,
-    fontSize: 16,
+    minHeight: 170,
+    borderRadius: 22,
+    padding: 18,
+    fontSize: 18,
     textAlignVertical: "top",
     borderWidth: 1,
-    borderColor: "#2B3323",
+    borderColor: "#2E4426",
   },
   renderButton: {
-    backgroundColor: "#C9894B",
-    borderRadius: 18,
-    padding: 18,
-    marginTop: 20,
+    backgroundColor: "#6F933D",
+    borderRadius: 22,
+    padding: 20,
+    marginTop: 24,
   },
   disabled: {
-    opacity: 0.65,
+    opacity: 0.6,
   },
   loadingRow: {
     flexDirection: "row",
@@ -231,29 +277,29 @@ const styles = StyleSheet.create({
     color: "#FFFFFF",
     fontWeight: "900",
     textAlign: "center",
-    fontSize: 18,
+    fontSize: 20,
     letterSpacing: 1,
   },
   message: {
     color: "#FFFFFF",
     textAlign: "center",
-    marginTop: 14,
-    fontSize: 14,
+    marginTop: 16,
+    fontSize: 16,
   },
   resultContainer: {
-    marginTop: 30,
+    marginTop: 32,
   },
   resultTitle: {
-    color: "#D8A04D",
+    color: "#79A94A",
     textAlign: "center",
     fontWeight: "900",
-    marginBottom: 12,
-    letterSpacing: 1,
+    marginBottom: 14,
+    letterSpacing: 2,
   },
   resultImage: {
     width: "100%",
-    height: 420,
+    height: 430,
     borderRadius: 24,
-    backgroundColor: "#171B16",
+    backgroundColor: "#0D1A10",
   },
 });
