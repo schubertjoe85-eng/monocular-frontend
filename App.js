@@ -11,6 +11,8 @@ import {
 } from "react-native";
 import * as ImagePicker from "expo-image-picker";
 import * as MediaLibrary from "expo-media-library";
+import * as FileSystem from "expo-file-system";
+
 const API_URL = "https://monocular-server.onrender.com";
 
 export default function App() {
@@ -22,18 +24,22 @@ export default function App() {
   const [message, setMessage] = useState("");
 
   async function pickImage() {
-    const result = await ImagePicker.launchImageLibraryAsync({
-      mediaTypes: ImagePicker.MediaTypeOptions.Images,
-      quality: 0.8,
-      base64: true,
-    });
+    try {
+      const result = await ImagePicker.launchImageLibraryAsync({
+        mediaTypes: ImagePicker.MediaTypeOptions.Images,
+        quality: 0.8,
+        base64: true,
+      });
 
-    if (!result.canceled && result.assets?.length) {
-      const asset = result.assets[0];
-      setSelectedImage(asset.uri);
-      setImageBase64(asset.base64 || null);
-      setResultImage(null);
-      setMessage("Image loaded.");
+      if (!result.canceled && result.assets && result.assets.length > 0) {
+        const asset = result.assets[0];
+        setSelectedImage(asset.uri);
+        setImageBase64(asset.base64 || null);
+        setResultImage(null);
+        setMessage("Image loaded.");
+      }
+    } catch {
+      setMessage("Image upload failed.");
     }
   }
 
@@ -48,13 +54,19 @@ export default function App() {
       setMessage("Rendering...");
       setResultImage(null);
 
-      const res = await fetch(`${API_URL}/render`, {
+      const response = await fetch(`${API_URL}/render`, {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ prompt, imageBase64, mode: "render" }),
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          prompt,
+          imageBase64,
+          mode: "render",
+        }),
       });
 
-      const data = await res.json();
+      const data = await response.json();
 
       if (data.image) {
         setResultImage(data.image);
@@ -66,6 +78,40 @@ export default function App() {
       setMessage("Server connection failed.");
     } finally {
       setLoading(false);
+    }
+  }
+
+  async function saveImage() {
+    if (!resultImage) {
+      setMessage("No image to save.");
+      return;
+    }
+
+    try {
+      const permission = await MediaLibrary.requestPermissionsAsync();
+
+      if (!permission.granted) {
+        setMessage("Photos permission required.");
+        return;
+      }
+
+      let fileUri = resultImage;
+
+      if (resultImage.startsWith("data:image")) {
+        const base64 = resultImage.split(",")[1];
+        fileUri = `${FileSystem.cacheDirectory}monocular-render-${Date.now()}.png`;
+
+        await FileSystem.writeAsStringAsync(fileUri, base64, {
+          encoding: FileSystem.EncodingType.Base64,
+        });
+      }
+
+      const asset = await MediaLibrary.createAssetAsync(fileUri);
+      await MediaLibrary.createAlbumAsync("Monocular", asset, false);
+
+      setMessage("Saved to Photos.");
+    } catch {
+      setMessage("Failed to save image.");
     }
   }
 
@@ -89,7 +135,11 @@ export default function App() {
         </TouchableOpacity>
 
         {selectedImage ? (
-          <Image source={{ uri: selectedImage }} style={styles.previewImage} />
+          <Image
+            source={{ uri: selectedImage }}
+            style={styles.previewImage}
+            resizeMode="cover"
+          />
         ) : null}
 
         <Text style={styles.label}>PROJECT BRIEF</Text>
@@ -104,13 +154,13 @@ export default function App() {
         />
 
         <TouchableOpacity
-          style={[styles.renderButton, loading && styles.disabled]}
+          style={[styles.renderButton, loading ? styles.disabled : null]}
           onPress={renderImage}
           disabled={loading}
         >
           {loading ? (
             <View style={styles.loadingRow}>
-              <ActivityIndicator color="#fff" />
+              <ActivityIndicator color="#FFFFFF" />
               <Text style={styles.buttonText}> RENDERING...</Text>
             </View>
           ) : (
@@ -124,7 +174,16 @@ export default function App() {
       {resultImage ? (
         <View style={styles.resultContainer}>
           <Text style={styles.resultTitle}>RESULT</Text>
-          <Image source={{ uri: resultImage }} style={styles.resultImage} />
+
+          <Image
+            source={{ uri: resultImage }}
+            style={styles.resultImage}
+            resizeMode="cover"
+          />
+
+          <TouchableOpacity style={styles.saveButton} onPress={saveImage}>
+            <Text style={styles.buttonText}>SAVE IMAGE</Text>
+          </TouchableOpacity>
         </View>
       ) : null}
     </ScrollView>
@@ -134,11 +193,12 @@ export default function App() {
 function LogoMark() {
   return (
     <View style={styles.logoBox}>
-      <View style={styles.logoCircle} />
-      <View style={styles.logoLineVertical} />
-      <View style={styles.logoLineHorizontal} />
-      <View style={styles.logoDiagOne} />
-      <View style={styles.logoDiagTwo} />
+      <View style={styles.logoCircleOuter} />
+      <View style={styles.logoCircleInner} />
+      <View style={styles.logoVertical} />
+      <View style={styles.logoHorizontal} />
+      <View style={styles.logoDiagonalOne} />
+      <View style={styles.logoDiagonalTwo} />
     </View>
   );
 }
@@ -163,31 +223,41 @@ const styles = StyleSheet.create({
     marginBottom: 26,
     overflow: "hidden",
   },
-  logoCircle: {
+  logoCircleOuter: {
     position: "absolute",
-    width: 62,
-    height: 62,
-    borderRadius: 31,
+    width: 72,
+    height: 72,
+    borderRadius: 36,
     borderWidth: 2,
     borderColor: "#6FA342",
-    top: 20,
-    left: 20,
+    top: 16,
+    left: 16,
   },
-  logoLineVertical: {
+  logoCircleInner: {
+    position: "absolute",
+    width: 42,
+    height: 42,
+    borderRadius: 21,
+    borderWidth: 2,
+    borderColor: "#6FA342",
+    top: 31,
+    left: 31,
+  },
+  logoVertical: {
     position: "absolute",
     width: 2,
     height: "100%",
     backgroundColor: "#6FA342",
     left: 51,
   },
-  logoLineHorizontal: {
+  logoHorizontal: {
     position: "absolute",
     height: 2,
     width: "100%",
     backgroundColor: "#6FA342",
     top: 51,
   },
-  logoDiagOne: {
+  logoDiagonalOne: {
     position: "absolute",
     width: 150,
     height: 2,
@@ -196,7 +266,7 @@ const styles = StyleSheet.create({
     top: 51,
     left: -24,
   },
-  logoDiagTwo: {
+  logoDiagonalTwo: {
     position: "absolute",
     width: 150,
     height: 2,
@@ -208,7 +278,7 @@ const styles = StyleSheet.create({
   title: {
     color: "#FFFFFF",
     textAlign: "center",
-    fontSize: 48,
+    fontSize: 44,
     fontWeight: "900",
     letterSpacing: 1,
     marginBottom: 20,
@@ -265,6 +335,12 @@ const styles = StyleSheet.create({
     padding: 20,
     marginTop: 24,
   },
+  saveButton: {
+    backgroundColor: "#6F933D",
+    borderRadius: 22,
+    padding: 18,
+    marginTop: 16,
+  },
   disabled: {
     opacity: 0.6,
   },
@@ -302,10 +378,3 @@ const styles = StyleSheet.create({
     borderRadius: 24,
     backgroundColor: "#0D1A10",
   },
-saveButton: {
-  backgroundColor: "#6F933D",
-  borderRadius: 22,
-  padding: 18,
-  marginTop: 16,
-},
-});
