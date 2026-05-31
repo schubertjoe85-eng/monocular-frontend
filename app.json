@@ -5,16 +5,9 @@
     "version": "1.0.0",
     "orientation": "portrait",
     "scheme": "monocular",
-    "platforms": [
-      "ios",
-      "android",
-      "web"
-    ],
-    "assetBundlePatterns": [
-      "**/*"
-    ],
+    "platforms": ["ios", "android", "web"],
+    "assetBundlePatterns": ["**/*"],
     "plugins": [
-      "expo-router",
       [
         "expo-image-picker",
         {
@@ -31,20 +24,11 @@
     },
     "android": {
       "adaptiveIcon": {
-        "backgroundColor": "#556B2F"
-      },
-      "permissions": [
-        "android.permission.RECORD_AUDIO"
-      ]
+        "backgroundColor": "#6E8B3D"
+      }
     },
     "web": {
       "bundler": "metro"
-    },
-    "extra": {
-      "router": {},
-      "eas": {
-        "projectId": "62149eae-43a2-4b78-85ff-2bac7d23f305"
-      }
     }
   }
 }
