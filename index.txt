@@ -1,0 +1,240 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+
+<title>Monocular</title>
+
+<style>
+body{
+margin:0;
+background:#0F120D;
+font-family:Arial,sans-serif;
+color:white;
+}
+
+.wrap{
+max-width:900px;
+margin:auto;
+padding:40px 20px;
+}
+
+.logo{
+display:block;
+margin:auto;
+width:260px;
+}
+
+.sub{
+text-align:center;
+color:#D8A04D;
+font-size:18px;
+font-weight:700;
+margin-bottom:30px;
+}
+
+.card{
+background:#171B16;
+border:1px solid #7A8F4A;
+border-radius:24px;
+padding:24px;
+}
+
+label{
+display:block;
+margin-bottom:10px;
+margin-top:15px;
+color:#D8A04D;
+font-weight:700;
+}
+
+input[type=file]{
+width:100%;
+padding:14px;
+background:#10110F;
+color:white;
+border-radius:14px;
+}
+
+textarea{
+width:100%;
+height:160px;
+background:#10110F;
+color:white;
+border:none;
+border-radius:18px;
+padding:16px;
+font-size:16px;
+box-sizing:border-box;
+}
+
+button{
+width:100%;
+margin-top:20px;
+padding:18px;
+background:#C9894B;
+color:white;
+border:none;
+border-radius:18px;
+font-size:18px;
+font-weight:900;
+cursor:pointer;
+}
+
+#preview{
+display:none;
+width:100%;
+margin-top:20px;
+border-radius:20px;
+}
+
+#result{
+display:none;
+width:100%;
+margin-top:20px;
+border-radius:20px;
+}
+
+#msg{
+text-align:center;
+margin-top:15px;
+}
+</style>
+</head>
+
+<body>
+
+<div class="wrap">
+
+<img
+class="logo"
+src="https://raw.githubusercontent.com/schubertjoe85-eng/monocular-frontend/main/assets/monocular-logo.png"
+alt="Monocular"
+/>
+
+<p class="sub">
+Rational Architectural Visualisation
+</p>
+
+<div class="card">
+
+<label>IMAGE / DRAWING</label>
+
+<input id="file" type="file" accept="image/*">
+
+<img id="preview">
+
+<label>PROJECT BRIEF</label>
+
+<textarea
+id="prompt"
+placeholder="Describe materials, light, landscape, atmosphere..."
+></textarea>
+
+<button onclick="renderImage()">
+RENDER
+</button>
+
+<p id="msg"></p>
+
+<img id="result">
+
+</div>
+
+</div>
+
+<script>
+
+const API_URL = "https://monocular-server.onrender.com";
+
+let imageBase64 = "";
+
+document
+.getElementById("file")
+.addEventListener("change", function(e){
+
+const file = e.target.files[0];
+
+if(!file) return;
+
+const reader = new FileReader();
+
+reader.onload = function(){
+
+const dataUrl = reader.result;
+
+imageBase64 = dataUrl.split(",")[1];
+
+const preview =
+document.getElementById("preview");
+
+preview.src = dataUrl;
+preview.style.display = "block";
+
+document.getElementById("msg").innerText =
+"Image loaded.";
+
+};
+
+reader.readAsDataURL(file);
+
+});
+
+async function renderImage(){
+
+const prompt =
+document.getElementById("prompt").value;
+
+document.getElementById("msg").innerText =
+"Rendering...";
+
+try{
+
+const response = await fetch(
+`${API_URL}/render`,
+{
+method:"POST",
+headers:{
+"Content-Type":"application/json"
+},
+body:JSON.stringify({
+prompt,
+imageBase64
+})
+}
+);
+
+const data = await response.json();
+
+if(data.image){
+
+const result =
+document.getElementById("result");
+
+result.src = data.image;
+result.style.display = "block";
+
+document.getElementById("msg").innerText =
+"Render complete.";
+
+}else{
+
+document.getElementById("msg").innerText =
+data.error || "Render failed.";
+
+}
+
+}catch(err){
+
+document.getElementById("msg").innerText =
+"Server connection failed.";
+
+}
+
+}
+
+</script>
+
+</body>
+</html>
