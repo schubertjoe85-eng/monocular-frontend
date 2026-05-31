@@ -59,9 +59,10 @@ export default function App() {
           "Content-Type": "application/json",
         },
         body: JSON.stringify({
-          prompt,
-          imageBase64,
-        }),
+  prompt,
+  imageBase64,
+  mode: "render",
+}),
       });
 
       const data = await response.json();
