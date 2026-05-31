@@ -1,7 +1,9 @@
 import React, { useState } from "react";
 import {
   ActivityIndicator,
+  Alert,
   Image,
+  Platform,
   ScrollView,
   StyleSheet,
   Text,
@@ -25,6 +27,14 @@ export default function App() {
 
   async function pickImage() {
     try {
+      const permission =
+        await ImagePicker.requestMediaLibraryPermissionsAsync();
+
+      if (!permission.granted) {
+        setMessage("Photo permission required.");
+        return;
+      }
+
       const result = await ImagePicker.launchImageLibraryAsync({
         mediaTypes: ImagePicker.MediaTypeOptions.Images,
         quality: 0.8,
@@ -33,12 +43,13 @@ export default function App() {
 
       if (!result.canceled && result.assets && result.assets.length > 0) {
         const asset = result.assets[0];
+
         setSelectedImage(asset.uri);
         setImageBase64(asset.base64 || null);
         setResultImage(null);
         setMessage("Image loaded.");
       }
-    } catch {
+    } catch (error) {
       setMessage("Image upload failed.");
     }
   }
@@ -66,15 +77,29 @@ export default function App() {
         }),
       });
 
-      const data = await response.json();
+      let data = {};
+      try {
+        data = await response.json();
+      } catch {
+        data = {};
+      }
+
+      if (!response.ok) {
+        setMessage(data.error || "Render failed.");
+        return;
+      }
 
       if (data.image) {
-        setResultImage(data.image);
+        const imageUri = data.image.startsWith("data:image")
+          ? data.image
+          : `data:image/png;base64,${data.image}`;
+
+        setResultImage(imageUri);
         setMessage("Render complete.");
       } else {
         setMessage(data.error || "Render failed.");
       }
-    } catch {
+    } catch (error) {
       setMessage("Server connection failed.");
     } finally {
       setLoading(false);
@@ -99,7 +124,13 @@ export default function App() {
 
       if (resultImage.startsWith("data:image")) {
         const base64 = resultImage.split(",")[1];
-        fileUri = `${FileSystem.cacheDirectory}monocular-render-${Date.now()}.png`;
+
+        if (!base64) {
+          setMessage("Image save failed.");
+          return;
+        }
+
+        fileUri = `${FileSystem.cacheDirectory}monocular-${Date.now()}.png`;
 
         await FileSystem.writeAsStringAsync(fileUri, base64, {
           encoding: FileSystem.EncodingType.Base64,
@@ -107,10 +138,19 @@ export default function App() {
       }
 
       const asset = await MediaLibrary.createAssetAsync(fileUri);
-      await MediaLibrary.createAlbumAsync("Monocular", asset, false);
+
+      try {
+        await MediaLibrary.createAlbumAsync("Monocular", asset, false);
+      } catch {
+        // If album already exists or cannot be created, image is still saved.
+      }
 
       setMessage("Saved to Photos.");
-    } catch {
+
+      if (Platform.OS === "ios") {
+        Alert.alert("Saved", "Image saved to Photos.");
+      }
+    } catch (error) {
       setMessage("Failed to save image.");
     }
   }
@@ -203,13 +243,19 @@ function LogoMark() {
   );
 }
 
+const GREEN = "#6FA342";
+const GREEN_LIGHT = "#79A94A";
+const GREEN_BUTTON = "#6F933D";
+const DARK = "#07110B";
+const CARD = "#0D1A10";
+
 const styles = StyleSheet.create({
   page: {
     flex: 1,
-    backgroundColor: "#07110B",
+    backgroundColor: DARK,
   },
   content: {
-    padding: 24,
+    paddingHorizontal: 24,
     paddingTop: 54,
     paddingBottom: 90,
   },
@@ -217,7 +263,7 @@ const styles = StyleSheet.create({
     width: 104,
     height: 104,
     borderWidth: 2,
-    borderColor: "#6FA342",
+    borderColor: GREEN,
     borderRadius: 28,
     alignSelf: "center",
     marginBottom: 26,
@@ -229,7 +275,7 @@ const styles = StyleSheet.create({
     height: 72,
     borderRadius: 36,
     borderWidth: 2,
-    borderColor: "#6FA342",
+    borderColor: GREEN,
     top: 16,
     left: 16,
   },
@@ -239,7 +285,7 @@ const styles = StyleSheet.create({
     height: 42,
     borderRadius: 21,
     borderWidth: 2,
-    borderColor: "#6FA342",
+    borderColor: GREEN,
     top: 31,
     left: 31,
   },
@@ -247,21 +293,21 @@ const styles = StyleSheet.create({
     position: "absolute",
     width: 2,
     height: "100%",
-    backgroundColor: "#6FA342",
+    backgroundColor: GREEN,
     left: 51,
   },
   logoHorizontal: {
     position: "absolute",
     height: 2,
     width: "100%",
-    backgroundColor: "#6FA342",
+    backgroundColor: GREEN,
     top: 51,
   },
   logoDiagonalOne: {
     position: "absolute",
     width: 150,
     height: 2,
-    backgroundColor: "#6FA342",
+    backgroundColor: GREEN,
     transform: [{ rotate: "45deg" }],
     top: 51,
     left: -24,
@@ -270,7 +316,7 @@ const styles = StyleSheet.create({
     position: "absolute",
     width: 150,
     height: 2,
-    backgroundColor: "#6FA342",
+    backgroundColor: GREEN,
     transform: [{ rotate: "-45deg" }],
     top: 51,
     left: -24,
@@ -278,27 +324,29 @@ const styles = StyleSheet.create({
   title: {
     color: "#FFFFFF",
     textAlign: "center",
-    fontSize: 44,
+    fontSize: 42,
     fontWeight: "900",
     letterSpacing: 1,
     marginBottom: 20,
+    includeFontPadding: false,
   },
   subtitle: {
-    color: "#79A94A",
+    color: GREEN_LIGHT,
     textAlign: "center",
-    fontSize: 24,
+    fontSize: 22,
+    lineHeight: 30,
     fontWeight: "900",
     marginBottom: 34,
   },
   card: {
-    backgroundColor: "#0D1A10",
+    backgroundColor: CARD,
     borderRadius: 28,
     padding: 22,
     borderWidth: 2,
-    borderColor: "#6FA342",
+    borderColor: GREEN,
   },
   label: {
-    color: "#79A94A",
+    color: GREEN_LIGHT,
     fontSize: 15,
     fontWeight: "900",
     letterSpacing: 2,
@@ -306,9 +354,10 @@ const styles = StyleSheet.create({
     marginTop: 6,
   },
   uploadButton: {
-    backgroundColor: "#6F933D",
+    backgroundColor: GREEN_BUTTON,
     borderRadius: 22,
-    padding: 20,
+    paddingVertical: 20,
+    paddingHorizontal: 16,
     marginBottom: 24,
   },
   previewImage: {
@@ -316,10 +365,10 @@ const styles = StyleSheet.create({
     height: 300,
     borderRadius: 22,
     marginBottom: 24,
-    backgroundColor: "#07110B",
+    backgroundColor: DARK,
   },
   input: {
-    backgroundColor: "#07110B",
+    backgroundColor: DARK,
     color: "#FFFFFF",
     minHeight: 170,
     borderRadius: 22,
@@ -330,15 +379,17 @@ const styles = StyleSheet.create({
     borderColor: "#2E4426",
   },
   renderButton: {
-    backgroundColor: "#6F933D",
+    backgroundColor: GREEN_BUTTON,
     borderRadius: 22,
-    padding: 20,
+    paddingVertical: 20,
+    paddingHorizontal: 16,
     marginTop: 24,
   },
   saveButton: {
-    backgroundColor: "#6F933D",
+    backgroundColor: GREEN_BUTTON,
     borderRadius: 22,
-    padding: 18,
+    paddingVertical: 18,
+    paddingHorizontal: 16,
     marginTop: 16,
   },
   disabled: {
@@ -366,7 +417,7 @@ const styles = StyleSheet.create({
     marginTop: 32,
   },
   resultTitle: {
-    color: "#79A94A",
+    color: GREEN_LIGHT,
     textAlign: "center",
     fontWeight: "900",
     marginBottom: 14,
@@ -376,5 +427,6 @@ const styles = StyleSheet.create({
     width: "100%",
     height: 430,
     borderRadius: 24,
-    backgroundColor: "#0D1A10",
+    backgroundColor: CARD,
   },
+});
