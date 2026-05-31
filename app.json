@@ -3,30 +3,7 @@
     "name": "Monocular",
     "slug": "monocular",
     "version": "1.0.0",
-    "orientation": "portrait",
-    "scheme": "monocular",
     "platforms": ["ios", "android", "web"],
-    "assetBundlePatterns": ["**/*"],
-    "plugins": [
-      [
-        "expo-image-picker",
-        {
-          "photosPermission": "Monocular needs access to your photos so you can upload drawings and images for rendering."
-        }
-      ]
-    ],
-    "ios": {
-      "supportsTablet": true,
-      "bundleIdentifier": "com.schubertjoe.monocular",
-      "infoPlist": {
-        "ITSAppUsesNonExemptEncryption": false
-      }
-    },
-    "android": {
-      "adaptiveIcon": {
-        "backgroundColor": "#6E8B3D"
-      }
-    },
     "web": {
       "bundler": "metro"
     }
