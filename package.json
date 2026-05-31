@@ -10,6 +10,7 @@
   },
   "dependencies": {
     "expo": "~56.0.5",
+    "expo-image-picker": "~56.0.15",
     "react": "19.2.0",
     "react-dom": "19.2.0",
     "react-native": "0.85.3",
