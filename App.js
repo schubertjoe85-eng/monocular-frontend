@@ -24,7 +24,7 @@ export default function App() {
   async function pickImage() {
     try {
       const result = await ImagePicker.launchImageLibraryAsync({
-        mediaTypes: ImagePicker.MediaTypeOptions.Images,
+        mediaTypes: ["images"],
         quality: 0.8,
         base64: true,
       });
@@ -59,10 +59,10 @@ export default function App() {
           "Content-Type": "application/json",
         },
         body: JSON.stringify({
-  prompt,
-  imageBase64,
-  mode: "render",
-}),
+          prompt,
+          imageBase64,
+          mode: "render",
+        }),
       });
 
       const data = await response.json();
@@ -80,12 +80,13 @@ export default function App() {
     }
   }
 
-  <ScrollView style={styles.page} contentContainerStyle={styles.content}>
-  <Text style={styles.brand}>MONOCULAR</Text>
+  return (
+    <ScrollView style={styles.page} contentContainerStyle={styles.content}>
+      <Text style={styles.brand}>MONOCULAR</Text>
 
-  <Text style={styles.subtitle}>
-  Rational Architectural Visualisation
-</Text>
+      <Text style={styles.subtitle}>
+        Rational Architectural Visualisation
+      </Text>
 
       <View style={styles.card}>
         <Text style={styles.label}>IMAGE / DRAWING</Text>
@@ -155,15 +156,16 @@ const styles = StyleSheet.create({
   },
   content: {
     padding: 24,
-    paddingTop: 44,
+    paddingTop: 56,
     paddingBottom: 80,
   },
-  logoImage: {
-    width: 280,
-    height: 190,
-    alignSelf: "center",
-    resizeMode: "contain",
-    marginBottom: 8,
+  brand: {
+    color: "#FFFFFF",
+    fontSize: 42,
+    fontWeight: "900",
+    textAlign: "center",
+    letterSpacing: 2,
+    marginBottom: 12,
   },
   subtitle: {
     color: "#D8A04D",
