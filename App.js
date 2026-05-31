@@ -10,7 +10,7 @@ import {
   View,
 } from "react-native";
 import * as ImagePicker from "expo-image-picker";
-
+import * as MediaLibrary from "expo-media-library";
 const API_URL = "https://monocular-server.onrender.com";
 
 export default function App() {
@@ -302,4 +302,10 @@ const styles = StyleSheet.create({
     borderRadius: 24,
     backgroundColor: "#0D1A10",
   },
+saveButton: {
+  backgroundColor: "#6F933D",
+  borderRadius: 22,
+  padding: 18,
+  marginTop: 16,
+},
 });
