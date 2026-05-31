@@ -1,39 +1,69 @@
 import React, { useState } from "react";
 import {
-  View,
-  Text,
-  StyleSheet,
+  ActivityIndicator,
+  Image,
+  Platform,
   ScrollView,
+  StyleSheet,
+  Text,
   TextInput,
   TouchableOpacity,
-  Image,
+  View,
 } from "react-native";
+import * as ImagePicker from "expo-image-picker";
 
 const API_URL = "https://monocular-server.onrender.com";
 
 export default function App() {
   const [prompt, setPrompt] = useState("");
-  const [resultImage, setResultImage] = useState("");
-  const [loading, setLoading] = useState(false);
+  const [selectedImage, setSelectedImage] = useState(null);
+  const [imageBase64, setImageBase64] = useState(null);
+  const [resultImage, setResultImage] = useState(null);
   const [message, setMessage] = useState("");
+  const [loading, setLoading] = useState(false);
+
+  async function pickImage() {
+    try {
+      const result = await ImagePicker.launchImageLibraryAsync({
+        mediaTypes: ImagePicker.MediaTypeOptions.Images,
+        quality: 0.75,
+        base64: true,
+      });
+
+      if (!result.canceled && result.assets && result.assets.length > 0) {
+        const asset = result.assets[0];
+        setSelectedImage(asset.uri);
+        setImageBase64(asset.base64 || null);
+        setResultImage(null);
+        setMessage("Image loaded.");
+      }
+    } catch (error) {
+      setMessage("Image upload failed.");
+    }
+  }
 
   async function renderImage() {
-    if (!prompt.trim()) {
-      setMessage("Enter a prompt first.");
+    if (!prompt.trim() && !imageBase64) {
+      setMessage("Add a project brief or upload an image first.");
       return;
     }
 
     try {
       setLoading(true);
       setMessage("Rendering...");
-      setResultImage("");
+      setResultImage(null);
 
       const response = await fetch(`${API_URL}/render`, {
         method: "POST",
         headers: {
-          "Content-Type": "application/json"
+          "Content-Type": "application/json",
         },
-        body: JSON.stringify({ prompt })
+        body: JSON.stringify({
+          prompt,
+          imageBase64,
+          selectedImage,
+          platform: Platform.OS,
+        }),
       });
 
       const data = await response.json();
@@ -42,7 +72,7 @@ export default function App() {
         setResultImage(data.image);
         setMessage("Render complete.");
       } else {
-        setMessage(data.error || "Render failed.");
+        setMessage(data.error || data.detail || "Render failed.");
       }
     } catch (error) {
       setMessage("Server connection failed.");
@@ -57,25 +87,46 @@ export default function App() {
       <Text style={styles.subtitle}>AI Architectural Rendering</Text>
 
       <View style={styles.card}>
-        <Text style={styles.label}>Project brief</Text>
+        <Text style={styles.label}>IMAGE / DRAWING</Text>
+
+        <TouchableOpacity style={styles.uploadButton} onPress={pickImage}>
+          <Text style={styles.buttonText}>
+            {selectedImage ? "CHANGE IMAGE" : "IMPORT IMAGE"}
+          </Text>
+        </TouchableOpacity>
+
+        {selectedImage ? (
+          <Image
+            source={{ uri: selectedImage }}
+            style={styles.preview}
+            resizeMode="cover"
+          />
+        ) : null}
+
+        <Text style={styles.label}>PROJECT BRIEF</Text>
 
         <TextInput
           style={styles.input}
-          placeholder="Describe the building, mood, materials, light, landscape..."
-          placeholderTextColor="#8B8B8B"
+          placeholder="Describe the building, materials, landscape, light, mood..."
+          placeholderTextColor="#888"
           value={prompt}
           onChangeText={setPrompt}
           multiline
         />
 
         <TouchableOpacity
-          style={[styles.button, loading ? styles.buttonDisabled : null]}
+          style={[styles.renderButton, loading ? styles.disabled : null]}
           onPress={renderImage}
           disabled={loading}
         >
-          <Text style={styles.buttonText}>
-            {loading ? "RENDERING..." : "RENDER"}
-          </Text>
+          {loading ? (
+            <View style={styles.loadingRow}>
+              <ActivityIndicator color="#ffffff" />
+              <Text style={styles.buttonText}> RENDERING...</Text>
+            </View>
+          ) : (
+            <Text style={styles.buttonText}>RENDER</Text>
+          )}
         </TouchableOpacity>
 
         {message ? <Text style={styles.message}>{message}</Text> : null}
@@ -84,7 +135,11 @@ export default function App() {
       {resultImage ? (
         <View style={styles.resultCard}>
           <Text style={styles.resultTitle}>RESULT</Text>
-          <Image source={{ uri: resultImage }} style={styles.resultImage} />
+          <Image
+            source={{ uri: resultImage }}
+            style={styles.resultImage}
+            resizeMode="cover"
+          />
         </View>
       ) : null}
     </ScrollView>
@@ -94,20 +149,20 @@ export default function App() {
 const styles = StyleSheet.create({
   page: {
     flex: 1,
-    backgroundColor: "#10110F"
+    backgroundColor: "#10110F",
   },
   content: {
     minHeight: "100vh",
     padding: 24,
-    paddingTop: 60,
-    paddingBottom: 60
+    paddingTop: 56,
+    paddingBottom: 60,
   },
   brand: {
     color: "#FFFFFF",
     fontSize: 42,
     fontWeight: "900",
     textAlign: "center",
-    letterSpacing: 2
+    letterSpacing: 2,
   },
   subtitle: {
     color: "#C9894B",
@@ -115,21 +170,35 @@ const styles = StyleSheet.create({
     fontWeight: "800",
     textAlign: "center",
     marginTop: 10,
-    marginBottom: 32
+    marginBottom: 30,
   },
   card: {
     backgroundColor: "#171B16",
     borderColor: "#6E8B3D",
     borderWidth: 1,
     borderRadius: 24,
-    padding: 20
+    padding: 20,
   },
   label: {
     color: "#C9894B",
-    fontSize: 14,
+    fontSize: 13,
     fontWeight: "900",
     marginBottom: 10,
-    letterSpacing: 1
+    marginTop: 8,
+    letterSpacing: 1,
+  },
+  uploadButton: {
+    backgroundColor: "#6E8B3D",
+    borderRadius: 18,
+    padding: 18,
+    marginBottom: 18,
+  },
+  preview: {
+    width: "100%",
+    height: 260,
+    borderRadius: 20,
+    backgroundColor: "#10110F",
+    marginBottom: 18,
   },
   input: {
     minHeight: 150,
@@ -138,43 +207,48 @@ const styles = StyleSheet.create({
     borderRadius: 18,
     padding: 16,
     fontSize: 16,
-    textAlignVertical: "top"
+    textAlignVertical: "top",
   },
-  button: {
-    backgroundColor: "#6E8B3D",
+  renderButton: {
+    backgroundColor: "#C9894B",
     borderRadius: 18,
     padding: 18,
-    marginTop: 18
+    marginTop: 18,
   },
-  buttonDisabled: {
-    opacity: 0.65
+  disabled: {
+    opacity: 0.65,
+  },
+  loadingRow: {
+    flexDirection: "row",
+    justifyContent: "center",
+    alignItems: "center",
   },
   buttonText: {
     color: "#FFFFFF",
     fontSize: 18,
     fontWeight: "900",
     textAlign: "center",
-    letterSpacing: 1
+    letterSpacing: 1,
   },
   message: {
     color: "#FFFFFF",
     textAlign: "center",
     marginTop: 14,
-    fontSize: 14
+    fontSize: 14,
   },
   resultCard: {
-    marginTop: 26
+    marginTop: 26,
   },
   resultTitle: {
     color: "#C9894B",
     textAlign: "center",
     fontWeight: "900",
-    marginBottom: 12
+    marginBottom: 12,
   },
   resultImage: {
     width: "100%",
     height: 380,
     borderRadius: 24,
-    backgroundColor: "#171B16"
-  }
+    backgroundColor: "#171B16",
+  },
 });
