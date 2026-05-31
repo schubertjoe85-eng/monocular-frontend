@@ -1,0 +1,52 @@
+<!doctype html>
+<html>
+<body style="margin:0;background:#10110F;color:white;font-family:Arial;padding:40px;text-align:center;">
+  <h1 style="font-size:48px;">MONOCULAR</h1>
+  <p style="color:#C9894B;font-size:20px;font-weight:bold;">Architectural rendering, refined.</p>
+
+  <div style="max-width:700px;margin:30px auto;background:#171B16;border:1px solid #6E8B3D;border-radius:24px;padding:24px;">
+    <input id="file" type="file" accept="image/*" style="color:white;margin-bottom:20px;" />
+    <textarea id="prompt" placeholder="Describe the project..." style="width:100%;height:140px;border-radius:16px;padding:16px;font-size:16px;"></textarea>
+    <button onclick="render()" style="width:100%;margin-top:20px;padding:18px;border-radius:18px;border:0;background:#6E8B3D;color:white;font-size:18px;font-weight:bold;">RENDER</button>
+    <p id="msg"></p>
+    <img id="result" style="display:none;width:100%;margin-top:20px;border-radius:20px;" />
+  </div>
+
+<script>
+const API_URL = "https://monocular-server.onrender.com";
+let imageBase64 = "";
+
+document.getElementById("file").onchange = e => {
+  const file = e.target.files[0];
+  const r = new FileReader();
+  r.onload = () => imageBase64 = r.result.split(",")[1];
+  if (file) r.readAsDataURL(file);
+};
+
+async function render() {
+  const msg = document.getElementById("msg");
+  const result = document.getElementById("result");
+  msg.innerText = "Rendering...";
+  const prompt = document.getElementById("prompt").value;
+
+  try {
+    const res = await fetch(API_URL + "/render", {
+      method: "POST",
+      headers: {"Content-Type":"application/json"},
+      body: JSON.stringify({ prompt, imageBase64 })
+    });
+    const data = await res.json();
+    if (data.image) {
+      result.src = data.image;
+      result.style.display = "block";
+      msg.innerText = "Render complete.";
+    } else {
+      msg.innerText = data.error || "Render failed.";
+    }
+  } catch {
+    msg.innerText = "Server connection failed.";
+  }
+}
+</script>
+</body>
+</html>
