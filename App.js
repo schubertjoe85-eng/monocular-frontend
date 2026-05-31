@@ -80,16 +80,12 @@ export default function App() {
     }
   }
 
-  return (
-    <ScrollView style={styles.page} contentContainerStyle={styles.content}>
-      <Image
-        source={require("./assets/monocular-logo.png")}
-        style={styles.logoImage}
-      />
+  <ScrollView style={styles.page} contentContainerStyle={styles.content}>
+  <Text style={styles.brand}>MONOCULAR</Text>
 
-      <Text style={styles.subtitle}>
-        Rational Architectural Visualisation
-      </Text>
+  <Text style={styles.subtitle}>
+  Rational Architectural Visualisation
+</Text>
 
       <View style={styles.card}>
         <Text style={styles.label}>IMAGE / DRAWING</Text>
