@@ -1,14 +1,13 @@
 import React, { useState } from "react";
 import {
-  ActivityIndicator,
-  Image,
-  Platform,
-  ScrollView,
-  StyleSheet,
-  Text,
-  TextInput,
-  TouchableOpacity,
   View,
+  Text,
+  TouchableOpacity,
+  TextInput,
+  Image,
+  ScrollView,
+  ActivityIndicator,
+  StyleSheet,
 } from "react-native";
 import * as ImagePicker from "expo-image-picker";
 
@@ -19,35 +18,31 @@ export default function App() {
   const [selectedImage, setSelectedImage] = useState(null);
   const [imageBase64, setImageBase64] = useState(null);
   const [resultImage, setResultImage] = useState(null);
-  const [message, setMessage] = useState("");
   const [loading, setLoading] = useState(false);
+  const [message, setMessage] = useState("");
 
   async function pickImage() {
     try {
       const result = await ImagePicker.launchImageLibraryAsync({
         mediaTypes: ImagePicker.MediaTypeOptions.Images,
-        quality: 0.75,
+        quality: 0.8,
         base64: true,
       });
 
-      if (!result.canceled && result.assets && result.assets.length > 0) {
+      if (!result.canceled) {
         const asset = result.assets[0];
+
         setSelectedImage(asset.uri);
-        setImageBase64(asset.base64 || null);
+        setImageBase64(asset.base64);
         setResultImage(null);
-        setMessage("Image loaded.");
+        setMessage("Image loaded");
       }
-    } catch (error) {
-      setMessage("Image upload failed.");
+    } catch (err) {
+      setMessage("Image upload failed");
     }
   }
 
   async function renderImage() {
-    if (!prompt.trim() && !imageBase64) {
-      setMessage("Add a project brief or upload an image first.");
-      return;
-    }
-
     try {
       setLoading(true);
       setMessage("Rendering...");
@@ -61,8 +56,6 @@ export default function App() {
         body: JSON.stringify({
           prompt,
           imageBase64,
-          selectedImage,
-          platform: Platform.OS,
         }),
       });
 
@@ -70,78 +63,88 @@ export default function App() {
 
       if (data.image) {
         setResultImage(data.image);
-        setMessage("Render complete.");
+        setMessage("Render complete");
       } else {
-        setMessage(data.error || data.detail || "Render failed.");
+        setMessage(data.error || "Render failed");
       }
-    } catch (error) {
-      setMessage("Server connection failed.");
+    } catch (err) {
+      setMessage("Server connection failed");
     } finally {
       setLoading(false);
     }
   }
 
   return (
-    <ScrollView style={styles.page} contentContainerStyle={styles.content}>
-      <Text style={styles.brand}>MONOCULAR</Text>
-      <Text style={styles.subtitle}>AI Architectural Rendering</Text>
+    <ScrollView
+      style={styles.page}
+      contentContainerStyle={styles.content}
+    >
+      <Text style={styles.logo}>MONOCULAR</Text>
+
+      <Text style={styles.subtitle}>
+        Rational Architectural Visualisation
+      </Text>
 
       <View style={styles.card}>
-        <Text style={styles.label}>IMAGE / DRAWING</Text>
 
-        <TouchableOpacity style={styles.uploadButton} onPress={pickImage}>
+        <TouchableOpacity
+          style={styles.uploadButton}
+          onPress={pickImage}
+        >
           <Text style={styles.buttonText}>
             {selectedImage ? "CHANGE IMAGE" : "IMPORT IMAGE"}
           </Text>
         </TouchableOpacity>
 
-        {selectedImage ? (
+        {selectedImage && (
           <Image
             source={{ uri: selectedImage }}
             style={styles.preview}
-            resizeMode="cover"
           />
-        ) : null}
-
-        <Text style={styles.label}>PROJECT BRIEF</Text>
+        )}
 
         <TextInput
           style={styles.input}
-          placeholder="Describe the building, materials, landscape, light, mood..."
-          placeholderTextColor="#888"
+          placeholder="Describe materials, light, landscape, atmosphere..."
+          placeholderTextColor="#777"
+          multiline
           value={prompt}
           onChangeText={setPrompt}
-          multiline
         />
 
         <TouchableOpacity
-          style={[styles.renderButton, loading ? styles.disabled : null]}
+          style={styles.renderButton}
           onPress={renderImage}
           disabled={loading}
         >
           {loading ? (
-            <View style={styles.loadingRow}>
-              <ActivityIndicator color="#ffffff" />
-              <Text style={styles.buttonText}> RENDERING...</Text>
-            </View>
+            <ActivityIndicator color="#fff" />
           ) : (
-            <Text style={styles.buttonText}>RENDER</Text>
+            <Text style={styles.buttonText}>
+              RENDER
+            </Text>
           )}
         </TouchableOpacity>
 
-        {message ? <Text style={styles.message}>{message}</Text> : null}
+        {message ? (
+          <Text style={styles.message}>
+            {message}
+          </Text>
+        ) : null}
       </View>
 
-      {resultImage ? (
-        <View style={styles.resultCard}>
-          <Text style={styles.resultTitle}>RESULT</Text>
+      {resultImage && (
+        <View style={styles.resultContainer}>
+          <Text style={styles.resultTitle}>
+            RESULT
+          </Text>
+
           <Image
             source={{ uri: resultImage }}
             style={styles.resultImage}
-            resizeMode="cover"
           />
         </View>
-      ) : null}
+      )}
     </ScrollView>
   );
 }
@@ -151,104 +154,96 @@ const styles = StyleSheet.create({
     flex: 1,
     backgroundColor: "#10110F",
   },
+
   content: {
-    minHeight: "100vh",
     padding: 24,
-    paddingTop: 56,
-    paddingBottom: 60,
+    paddingTop: 60,
+    paddingBottom: 80,
   },
-  brand: {
+
+  logo: {
     color: "#FFFFFF",
-    fontSize: 42,
+    fontSize: 46,
     fontWeight: "900",
     textAlign: "center",
-    letterSpacing: 2,
+    letterSpacing: 3,
+    marginBottom: 8,
   },
+
   subtitle: {
     color: "#C9894B",
-    fontSize: 17,
-    fontWeight: "800",
     textAlign: "center",
-    marginTop: 10,
+    fontSize: 16,
+    fontWeight: "700",
     marginBottom: 30,
   },
+
   card: {
     backgroundColor: "#171B16",
-    borderColor: "#6E8B3D",
-    borderWidth: 1,
     borderRadius: 24,
     padding: 20,
+    borderWidth: 1,
+    borderColor: "#6E8B3D",
   },
-  label: {
-    color: "#C9894B",
-    fontSize: 13,
-    fontWeight: "900",
-    marginBottom: 10,
-    marginTop: 8,
-    letterSpacing: 1,
-  },
+
   uploadButton: {
     backgroundColor: "#6E8B3D",
     borderRadius: 18,
     padding: 18,
-    marginBottom: 18,
+    marginBottom: 20,
   },
+
   preview: {
     width: "100%",
-    height: 260,
+    height: 280,
     borderRadius: 20,
-    backgroundColor: "#10110F",
-    marginBottom: 18,
+    marginBottom: 20,
   },
+
   input: {
-    minHeight: 150,
-    color: "#FFFFFF",
     backgroundColor: "#10110F",
+    color: "#FFFFFF",
+    minHeight: 160,
     borderRadius: 18,
     padding: 16,
     fontSize: 16,
     textAlignVertical: "top",
   },
+
   renderButton: {
     backgroundColor: "#C9894B",
     borderRadius: 18,
     padding: 18,
-    marginTop: 18,
+    marginTop: 20,
   },
-  disabled: {
-    opacity: 0.65,
-  },
-  loadingRow: {
-    flexDirection: "row",
-    justifyContent: "center",
-    alignItems: "center",
-  },
+
   buttonText: {
     color: "#FFFFFF",
-    fontSize: 18,
     fontWeight: "900",
     textAlign: "center",
-    letterSpacing: 1,
+    fontSize: 18,
   },
+
   message: {
     color: "#FFFFFF",
     textAlign: "center",
     marginTop: 14,
-    fontSize: 14,
   },
-  resultCard: {
-    marginTop: 26,
+
+  resultContainer: {
+    marginTop: 30,
   },
+
   resultTitle: {
     color: "#C9894B",
     textAlign: "center",
     fontWeight: "900",
     marginBottom: 12,
   },
+
   resultImage: {
     width: "100%",
-    height: 380,
+    height: 420,
     borderRadius: 24,
-    backgroundColor: "#171B16",
   },
 });
