@@ -14,12 +14,7 @@ import {
 import * as ImagePicker from "expo-image-picker";
 import * as MediaLibrary from "expo-media-library";
 import * as FileSystem from "expo-file-system";
-import {
-  useIAP,
-  fetchProducts,
-  requestPurchase,
-  finishTransaction,
-} from "expo-iap";
+import { useIAP } from "expo-iap";
 
 const API_URL = "https://monocular-server.onrender.com";
 const PRODUCT_ID = "monocular_pro_monthly";
@@ -36,58 +31,79 @@ export default function App() {
   const [buying, setBuying] = useState(false);
 
   const {
-    connected,
-    products,
-    currentPurchase,
-    currentPurchaseError,
-    getActiveSubscriptions,
-    hasActiveSubscriptions,
-  } = useIAP();
+  connected,
+  products,
+  currentPurchase,
+  currentPurchaseError,
+  fetchProducts,
+  requestPurchase,
+  finishTransaction,
+  hasActiveSubscriptions,
+} = useIAP();
 
   useEffect(() => {
-    async function setupIap() {
-      try {
-        if (!connected) return;
+    async function buySubscription() {
+    setBuying(true);
+    setMessage("Opening Apple subscription...");
 
-        await fetchProducts({
-          skus: [PRODUCT_ID],
-          type: "subs",
-        });
-
-        const active = await hasActiveSubscriptions([PRODUCT_ID]);
-        setSubscribed(Boolean(active));
-      } catch (error) {
-        setMessage("Subscription check failed.");
-      } finally {
-        setCheckingSub(false);
-      }
+    if (!connected) {
+      setMessage("Store connection not ready. Try again in a moment.");
+      setBuying(false);
+      return;
     }
 
-    setupIap();
-  }, [connected]);
+    await fetchProducts({
+      skus: [PRODUCT_ID],
+      type: "subs",
+    });
+
+    await requestPurchase({
+      request: {
+        ios: {
+          sku: PRODUCT_ID,
+        },
+      },
+      type: "subs",
+    });
+  } catch (error) {
+    console.log("Purchase error:", error);
+    setBuying(false);
+    setMessage(error?.message || "Could not start subscription.");
+  }
+}
+
 
   useEffect(() => {
-    async function completePurchase() {
-      if (!currentPurchase) return;
+  async function buySubscription() {
+  try {
+    setBuying(true);
+    setMessage("Opening Apple subscription...");
 
-      try {
-        await finishTransaction({
-          purchase: currentPurchase,
-          isConsumable: false,
-        });
-
-        const active = await hasActiveSubscriptions([PRODUCT_ID]);
-        setSubscribed(Boolean(active));
-
-        if (active) {
-          setMessage("Subscription active.");
-        }
-      } catch (error) {
-        setMessage("Purchase completed, but verification failed.");
-      } finally {
-        setBuying(false);
-      }
+    if (!connected) {
+      setMessage("Store connection not ready. Try again in a moment.");
+      setBuying(false);
+      return;
     }
+
+    await fetchProducts({
+      skus: [PRODUCT_ID],
+      type: "subs",
+    });
+
+    await requestPurchase({
+      request: {
+        ios: {
+          sku: PRODUCT_ID,
+        },
+      },
+      type: "subs",
+    });
+  } catch (error) {
+    console.log("Purchase error:", error);
+    setBuying(false);
+    setMessage(error?.message || "Could not start subscription.");
+  }
+
 
     completePurchase();
   }, [currentPurchase]);
