@@ -1,11 +1,4 @@
-"ios": {
-  "bundleIdentifier": "com.schubertjoe.monocular",
-  "infoPlist": {
-    "ITSAppUsesNonExemptEncryption": false,
-    "NSPhotoLibraryUsageDescription": "Monocular needs photo access so you can import images.",
-    "NSPhotoLibraryAddUsageDescription": "Monocular needs permission to save rendered images."
-  }
-},{
+{
   "expo": {
     "name": "Monocular",
     "slug": "monocular",
@@ -18,15 +11,22 @@
     "web": {
       "bundler": "metro"
     },
+    "ios": {
+      "bundleIdentifier": "com.schubertjoe.monocular",
+      "buildNumber": "1",
+      "supportsTablet": true,
+      "infoPlist": {
+        "ITSAppUsesNonExemptEncryption": false,
+        "NSPhotoLibraryUsageDescription": "Monocular needs photo access so you can import images.",
+        "NSPhotoLibraryAddUsageDescription": "Monocular needs permission to save rendered images."
+      }
+    },
+    "android": {
+      "package": "com.schubertjoe.monocular"
+    },
     "extra": {
       "eas": {
         "projectId": "62149eae-43a2-4b78-85ff-2bac7d23f305"
-      }
-    },
-    "ios": {
-      "bundleIdentifier": "com.schubertjoe.monocular",
-      "infoPlist": {
-        "ITSAppUsesNonExemptEncryption": false
       }
     }
   }

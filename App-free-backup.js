@@ -1,9 +1,7 @@
-import React, { useEffect, useState } from "react";
+import React, { useState } from "react";
 import {
   ActivityIndicator,
-  Alert,
   Image,
-  Platform,
   ScrollView,
   StyleSheet,
   Text,
@@ -14,15 +12,8 @@ import {
 import * as ImagePicker from "expo-image-picker";
 import * as MediaLibrary from "expo-media-library";
 import * as FileSystem from "expo-file-system";
-import {
-  useIAP,
-  fetchProducts,
-  requestPurchase,
-  finishTransaction,
-} from "expo-iap";
 
 const API_URL = "https://monocular-server.onrender.com";
-const PRODUCT_ID = "monocular_pro_monthly";
 
 export default function App() {
   const [prompt, setPrompt] = useState("");
@@ -31,105 +22,6 @@ export default function App() {
   const [resultImage, setResultImage] = useState(null);
   const [loading, setLoading] = useState(false);
   const [message, setMessage] = useState("");
-  const [subscribed, setSubscribed] = useState(false);
-  const [checkingSub, setCheckingSub] = useState(true);
-  const [buying, setBuying] = useState(false);
-
-  const {
-    connected,
-    products,
-    currentPurchase,
-    currentPurchaseError,
-    getActiveSubscriptions,
-    hasActiveSubscriptions,
-  } = useIAP();
-
-  useEffect(() => {
-    async function setupIap() {
-      try {
-        if (!connected) return;
-
-        await fetchProducts({
-          skus: [PRODUCT_ID],
-          type: "subs",
-        });
-
-        const active = await hasActiveSubscriptions([PRODUCT_ID]);
-        setSubscribed(Boolean(active));
-      } catch (error) {
-        setMessage("Subscription check failed.");
-      } finally {
-        setCheckingSub(false);
-      }
-    }
-
-    setupIap();
-  }, [connected]);
-
-  useEffect(() => {
-    async function completePurchase() {
-      if (!currentPurchase) return;
-
-      try {
-        await finishTransaction({
-          purchase: currentPurchase,
-          isConsumable: false,
-        });
-
-        const active = await hasActiveSubscriptions([PRODUCT_ID]);
-        setSubscribed(Boolean(active));
-
-        if (active) {
-          setMessage("Subscription active.");
-        }
-      } catch (error) {
-        setMessage("Purchase completed, but verification failed.");
-      } finally {
-        setBuying(false);
-      }
-    }
-
-    completePurchase();
-  }, [currentPurchase]);
-
-  useEffect(() => {
-    if (currentPurchaseError) {
-      setBuying(false);
-      setMessage("Purchase cancelled or failed.");
-    }
-  }, [currentPurchaseError]);
-
-  async function buySubscription() {
-    try {
-      setBuying(true);
-      setMessage("Opening Apple subscription...");
-
-      await requestPurchase({
-        request: {
-          ios: {
-            sku: PRODUCT_ID,
-          },
-        },
-        type: "subs",
-      });
-    } catch (error) {
-      setBuying(false);
-      setMessage("Could not start subscription.");
-    }
-  }
-
-  async function restoreSubscription() {
-    try {
-      setCheckingSub(true);
-      const active = await hasActiveSubscriptions([PRODUCT_ID]);
-      setSubscribed(Boolean(active));
-      setMessage(active ? "Subscription restored." : "No active subscription found.");
-    } catch {
-      setMessage("Restore failed.");
-    } finally {
-      setCheckingSub(false);
-    }
-  }
 
   async function pickImage() {
     try {
@@ -152,11 +44,6 @@ export default function App() {
   }
 
   async function renderImage() {
-    if (!subscribed) {
-      setMessage("Subscribe to render.");
-      return;
-    }
-
     if (!prompt.trim() && !imageBase64) {
       setMessage("Add a brief or upload an image first.");
       return;
@@ -226,70 +113,6 @@ export default function App() {
     } catch {
       setMessage("Failed to save image.");
     }
-  }
-
-  if (checkingSub) {
-    return (
-      <View style={styles.pageCenter}>
-        <LogoMark />
-        <ActivityIndicator color="#FFFFFF" />
-        <Text style={styles.message}>Checking subscription...</Text>
-      </View>
-    );
-  }
-
-  if (!subscribed) {
-    const product = products && products.length > 0 ? products[0] : null;
-    const price = product?.localizedPrice || "$19.99/month";
-
-    return (
-      <ScrollView style={styles.page} contentContainerStyle={styles.content}>
-        <LogoMark />
-
-        <Text numberOfLines={1} adjustsFontSizeToFit style={styles.title}>
-          MONOCULAR
-        </Text>
-
-        <Text style={styles.subtitle}>AI Architectural Rendering</Text>
-
-        <View style={styles.card}>
-          <Text style={styles.paywallTitle}>Monocular Monthly</Text>
-
-          <Text style={styles.paywallText}>
-            Subscribe to generate architectural visualisations from sketches,
-            drawings and photos.
-          </Text>
-
-          <Text style={styles.price}>{price}</Text>
-
-          <TouchableOpacity
-            style={[styles.renderButton, buying ? styles.disabled : null]}
-            onPress={buySubscription}
-            disabled={buying}
-          >
-            {buying ? (
-              <View style={styles.loadingRow}>
-                <ActivityIndicator color="#FFFFFF" />
-                <Text style={styles.buttonText}> OPENING...</Text>
-              </View>
-            ) : (
-              <Text style={styles.buttonText}>SUBSCRIBE</Text>
-            )}
-          </TouchableOpacity>
-
-          <TouchableOpacity style={styles.restoreButton} onPress={restoreSubscription}>
-            <Text style={styles.restoreText}>RESTORE PURCHASE</Text>
-          </TouchableOpacity>
-
-          <Text style={styles.smallText}>
-            Payment is charged to your Apple ID. Subscription renews automatically
-            unless cancelled at least 24 hours before renewal.
-          </Text>
-
-          {message ? <Text style={styles.message}>{message}</Text> : null}
-        </View>
-      </ScrollView>
-    );
   }
 
   return (
@@ -384,13 +207,6 @@ const styles = StyleSheet.create({
   page: {
     flex: 1,
     backgroundColor: "#07110B",
-  },
-  pageCenter: {
-    flex: 1,
-    backgroundColor: "#07110B",
-    justifyContent: "center",
-    alignItems: "center",
-    padding: 24,
   },
   content: {
     padding: 24,
@@ -525,17 +341,6 @@ const styles = StyleSheet.create({
     padding: 18,
     marginTop: 16,
   },
-  restoreButton: {
-    padding: 18,
-    marginTop: 12,
-  },
-  restoreText: {
-    color: "#79A94A",
-    fontWeight: "900",
-    textAlign: "center",
-    fontSize: 15,
-    letterSpacing: 1,
-  },
   disabled: {
     opacity: 0.6,
   },
@@ -556,34 +361,6 @@ const styles = StyleSheet.create({
     textAlign: "center",
     marginTop: 16,
     fontSize: 16,
-  },
-  paywallTitle: {
-    color: "#FFFFFF",
-    textAlign: "center",
-    fontSize: 30,
-    fontWeight: "900",
-    marginBottom: 16,
-  },
-  paywallText: {
-    color: "#FFFFFF",
-    textAlign: "center",
-    fontSize: 17,
-    lineHeight: 25,
-    marginBottom: 20,
-  },
-  price: {
-    color: "#79A94A",
-    textAlign: "center",
-    fontSize: 26,
-    fontWeight: "900",
-    marginBottom: 4,
-  },
-  smallText: {
-    color: "#8FA08A",
-    textAlign: "center",
-    fontSize: 12,
-    lineHeight: 18,
-    marginTop: 10,
   },
   resultContainer: {
     marginTop: 32,
