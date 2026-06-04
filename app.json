@@ -3,27 +3,46 @@
     "name": "Monocular",
     "slug": "monocular",
     "version": "1.0.0",
+
+    "icon": "./assets/icon.png",
+
+    "userInterfaceStyle": "dark",
+
+    "splash": {
+      "image": "./assets/splash.png",
+      "resizeMode": "contain",
+      "backgroundColor": "#111111"
+    },
+
     "platforms": [
       "ios",
       "android",
       "web"
     ],
+
     "web": {
       "bundler": "metro"
     },
+
     "ios": {
       "bundleIdentifier": "com.schubertjoe.monocular",
-      "buildNumber": "1",
+      "buildNumber": "50",
       "supportsTablet": true,
       "infoPlist": {
         "ITSAppUsesNonExemptEncryption": false,
-        "NSPhotoLibraryUsageDescription": "Monocular needs photo access so you can import images.",
+        "NSPhotoLibraryUsageDescription": "Monocular needs photo access so you can select images.",
         "NSPhotoLibraryAddUsageDescription": "Monocular needs permission to save rendered images."
       }
     },
+
     "android": {
-      "package": "com.schubertjoe.monocular"
+      "package": "com.schubertjoe.monocular",
+      "adaptiveIcon": {
+        "foregroundImage": "./assets/adaptive-icon.png",
+        "backgroundColor": "#111111"
+      }
     },
+
     "extra": {
       "eas": {
         "projectId": "62149eae-43a2-4b78-85ff-2bac7d23f305"
