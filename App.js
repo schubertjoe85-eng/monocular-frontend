@@ -152,10 +152,6 @@ export default function App() {
   }
 
   async function renderImage() {
-    if (!subscribed) {
-      setMessage("Subscribe to render.");
-      return;
-    }
 
     if (!prompt.trim() && !imageBase64) {
       setMessage("Add a brief or upload an image first.");
