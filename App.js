@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from "react";
+pico App.jsimport React, { useEffect, useState } from "react";
 import {
   ActivityIndicator,
   Alert,
@@ -100,23 +100,26 @@ export default function App() {
   }, [currentPurchaseError]);
 
   async function buySubscription() {
-    try {
-      setBuying(true);
-      setMessage("Opening Apple subscription...");
+  try {
+    setBuying(true);
+    setMessage("Opening Apple subscription...");
 
-      await requestPurchase({
-        request: {
-          ios: {
-            sku: PRODUCT_ID,
-          },
-        },
-        type: "subs",
-      });
-    } catch (error) {
-      setBuying(false);
-      setMessage("Could not start subscription.");
-    }
+    await fetchProducts({
+      skus: [PRODUCT_ID],
+      type: "subs",
+    });
+
+    await requestPurchase({
+      sku: PRODUCT_ID,
+      type: "subs",
+    });
+  } catch (error) {
+    console.log("Purchase error:", error);
+    setMessage(error?.message || "Could not start subscription.");
+  } finally {
+    setBuying(false);
   }
+}
 
   async function restoreSubscription() {
     try {
