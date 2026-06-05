@@ -111,7 +111,7 @@ export default function App() {
 
     await requestPurchase({
   request: {
-    apple: {
+    ios: {
       sku: PRODUCT_ID,
     },
   },
