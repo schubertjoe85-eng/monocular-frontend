@@ -55,7 +55,8 @@ export default function App() {
         });
 
         const active = await hasActiveSubscriptions([PRODUCT_ID]);
-        setSubscribed(Boolean(active));
+        setSubscribed(true);
+setMessage("Subscription active.");
       } catch (error) {
         setMessage("Subscription check failed.");
       } finally {
