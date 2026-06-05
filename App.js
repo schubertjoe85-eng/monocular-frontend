@@ -109,7 +109,14 @@ export default function App() {
       type: "subs",
     });
 
-    await requestPurchase(PRODUCT_ID);
+    await requestPurchase({
+  request: {
+    apple: {
+      sku: PRODUCT_ID,
+    },
+  },
+  type: "subs",
+});
   } catch (error) {
     console.log("Purchase error:", error);
     setMessage(error?.message || "Could not start subscription.");
