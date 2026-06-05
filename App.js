@@ -14,12 +14,7 @@ import {
 import * as ImagePicker from "expo-image-picker";
 import * as MediaLibrary from "expo-media-library";
 import * as FileSystem from "expo-file-system";
-import {
-  useIAP,
-  fetchProducts,
-  requestPurchase,
-  finishTransaction,
-} from "expo-iap";
+
 
 const API_URL = "https://monocular-server.onrender.com";
 const PRODUCT_ID = "monocular_pro_monthly";
@@ -31,113 +26,11 @@ export default function App() {
   const [resultImage, setResultImage] = useState(null);
   const [loading, setLoading] = useState(false);
   const [message, setMessage] = useState("");
-  const [subscribed, setSubscribed] = useState(false);
+  const [subscribed, setSubscribed] = useState(true);
   const [checkingSub, setCheckingSub] = useState(true);
   const [buying, setBuying] = useState(false);
 
-  const {
-    connected,
-    products,
-    currentPurchase,
-    currentPurchaseError,
-    getActiveSubscriptions,
-    hasActiveSubscriptions,
-  } = useIAP();
-
-  useEffect(() => {
-    async function setupIap() {
-      try {
-        if (!connected) return;
-
-        await fetchProducts({
-          skus: [PRODUCT_ID],
-          type: "subs",
-        });
-
-        const active = await hasActiveSubscriptions([PRODUCT_ID]);
-        setSubscribed(true);
-setMessage("Subscription active.");
-      } catch (error) {
-        setMessage("Subscription check failed.");
-      } finally {
-        setCheckingSub(false);
-      }
-    }
-
-    setupIap();
-  }, [connected]);
-
-  useEffect(() => {
-    async function completePurchase() {
-      if (!currentPurchase) return;
-
-      try {
-        await finishTransaction({
-          purchase: currentPurchase,
-          isConsumable: false,
-        });
-
-        const active = await hasActiveSubscriptions([PRODUCT_ID]);
-        setSubscribed(Boolean(active));
-
-        if (active) {
-          setMessage("Subscription active.");
-        }
-      } catch (error) {
-        setMessage("Purchase completed, but verification failed.");
-      } finally {
-        setBuying(false);
-      }
-    }
-
-    completePurchase();
-  }, [currentPurchase]);
-
-  useEffect(() => {
-    if (currentPurchaseError) {
-      setBuying(false);
-      setMessage("Purchase cancelled or failed.");
-    }
-  }, [currentPurchaseError]);
-
-  async function buySubscription() {
-  try {
-    setBuying(true);
-    setMessage("Opening Apple subscription...");
-
-    await fetchProducts({
-      skus: [PRODUCT_ID],
-      type: "subs",
-    });
-
-    await requestPurchase({
-  request: {
-    ios: {
-      sku: PRODUCT_ID,
-    },
-  },
-  type: "subs",
-});
-  } catch (error) {
-    console.log("Purchase error:", error);
-    setMessage(error?.message || "Could not start subscription.");
-  } finally {
-    setBuying(false);
-  }
-}
-
-  async function restoreSubscription() {
-    try {
-      setCheckingSub(true);
-      const active = await hasActiveSubscriptions([PRODUCT_ID]);
-      setSubscribed(Boolean(active));
-      setMessage(active ? "Subscription restored." : "No active subscription found.");
-    } catch {
-      setMessage("Restore failed.");
-    } finally {
-      setCheckingSub(false);
-    }
-  }
+  
 
   async function pickImage() {
     try {
@@ -160,6 +53,10 @@ setMessage("Subscription active.");
   }
 
   async function renderImage() {
+    if (!subscribed) {
+      setMessage("Subscribe to render.");
+      return;
+    }
 
     if (!prompt.trim() && !imageBase64) {
       setMessage("Add a brief or upload an image first.");
@@ -242,7 +139,7 @@ setMessage("Subscription active.");
     );
   }
 
-  if (!subscribed && Platform.OS !== "ios") {
+  if (!subscribed) {
     const product = products && products.length > 0 ? products[0] : null;
     const price = product?.localizedPrice || "$19.99/month";
 
