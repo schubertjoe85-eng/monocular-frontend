@@ -11,14 +11,14 @@
     "export:web": "expo export --platform web"
   },
   "dependencies": {
-    "expo": "~53.0.0",
+    "@shopify/react-native-skia": "^2.6.4",
+    "expo": "~52.0.0",
     "expo-file-system": "~18.1.11",
-    "expo-iap": "^4.3.1",
-    "expo-image-picker": "~16.1.4",
-    "expo-media-library": "~17.1.7",
+    "expo-image-picker": "~16.0.6",
+    "expo-media-library": "~17.0.6",
     "expo-status-bar": "~2.2.3",
     "react": "19.0.0",
-    "react-native": "0.79.5",
+    "react-native": "0.76.9",
     "react-native-web": "~0.20.0"
   },
   "devDependencies": {
