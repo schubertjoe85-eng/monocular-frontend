@@ -25,9 +25,8 @@
     },
 
     "ios": {
-  "icon": "./assets/icon.png",
   "bundleIdentifier": "com.schubertjoe.monocular",
-  "buildNumber": "101",
+  "buildNumber": "101"
   "supportsTablet": true,
       "infoPlist": {
         "ITSAppUsesNonExemptEncryption": false,
