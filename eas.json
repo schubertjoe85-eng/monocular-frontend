@@ -10,10 +10,12 @@
     },
     "preview": {
       "distribution": "internal"
-    },
     "production": {
-      "ios": {
-        "image": "macos-sequoia-15.6-xcode-26.0"
+  "autoIncrement": true,
+  "ios": {
+    "image": "macos-sequoia-15.6-xcode-26.0"
+  }
+}
       }
     }
   },
