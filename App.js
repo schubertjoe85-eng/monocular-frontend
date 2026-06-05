@@ -242,7 +242,7 @@ setMessage("Subscription active.");
     );
   }
 
-  if (!subscribed) {
+  if (!subscribed && Platform.OS !== "ios") {
     const product = products && products.length > 0 ? products[0] : null;
     const price = product?.localizedPrice || "$19.99/month";
 
