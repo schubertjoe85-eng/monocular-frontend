@@ -27,7 +27,7 @@ export default function App() {
   const [loading, setLoading] = useState(false);
   const [message, setMessage] = useState("");
   const [subscribed, setSubscribed] = useState(true);
-  const [checkingSub, setCheckingSub] = useState(true);
+  const [checkingSub, setCheckingSub] = useState(false);
   const [buying, setBuying] = useState(false);
 
   
