@@ -4,10 +4,7 @@
     "slug": "monocular",
     "version": "1.0.0",
 
-    "icon": "./assets/icon.png",
-"ios": {
-  "icon": "./assets/icon.png"
-}
+    
 
     "userInterfaceStyle": "dark",
 
@@ -28,9 +25,10 @@
     },
 
     "ios": {
-      "bundleIdentifier": "com.schubertjoe.monocular",
-      "buildNumber": "50",
-      "supportsTablet": true,
+  "icon": "./assets/icon.png",
+  "bundleIdentifier": "com.schubertjoe.monocular",
+  "buildNumber": "50",
+  "supportsTablet": true,
       "infoPlist": {
         "ITSAppUsesNonExemptEncryption": false,
         "NSPhotoLibraryUsageDescription": "Monocular needs photo access so you can select images.",
