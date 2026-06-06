@@ -26,7 +26,7 @@
 
     "ios": {
   "bundleIdentifier": "com.schubertjoe.monocular",
-  "buildNumber": "102",
+  "buildNumber": "103",
 "supportsTablet": true,
       "infoPlist": {
         "ITSAppUsesNonExemptEncryption": false,
