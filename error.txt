@@ -1,0 +1,130 @@
+JsonFileError: Error parsing JSON: {
+  "expo": {
+    "name": "Monocular",
+    "slug": "monocular",
+    "version": "1.0.0",
+
+    
+
+    "userInterfaceStyle": "dark",
+
+    "splash": {
+      "image": "./assets/splash.png",
+      "resizeMode": "contain",
+      "backgroundColor": "#111111"
+    },
+
+    "platforms": [
+      "ios",
+      "android",
+      "web"
+    ],
+
+    "web": {
+      "bundler": "metro"
+    },
+
+    "ios": {
+  "bundleIdentifier": "com.schubertjoe.monocular",
+  "buildNumber": "101"
+  "supportsTablet": true,
+      "infoPlist": {
+        "ITSAppUsesNonExemptEncryption": false,
+        "NSPhotoLibraryUsageDescription": "Monocular needs photo access so you can select images.",
+        "NSPhotoLibraryAddUsageDescription": "Monocular needs permission to save rendered images."
+      },
+    }
+
+    "android": {
+      "package": "com.schubertjoe.monocular",
+      "adaptiveIcon": {
+        "foregroundImage": "./assets/adaptive-icon.png",
+        "backgroundColor": "#111111"
+      }
+    },
+
+    "extra": {
+      "eas": {
+        "projectId": "62149eae-43a2-4b78-85ff-2bac7d23f305"
+      }
+    }
+  }
+}
+
+├─ File: /Users/joeschubert/monocular-new/app.json
+└─ Cause: SyntaxError: JSON5: invalid character '\"' at 30:3
+  28 |   "bundleIdentifier": "com.schubertjoe.monocular",
+  29 |   "buildNumber": "101"
+> 30 |   "supportsTablet": true,
+     |   ^
+  31 |       "infoPlist": {
+  32 |         "ITSAppUsesNonExemptEncryption": false,
+  33 |         "NSPhotoLibraryUsageDescription": "Monocular needs photo access so you can select images.",
+JsonFileError: Error parsing JSON: {
+  "expo": {
+    "name": "Monocular",
+    "slug": "monocular",
+    "version": "1.0.0",
+
+    
+
+    "userInterfaceStyle": "dark",
+
+    "splash": {
+      "image": "./assets/splash.png",
+      "resizeMode": "contain",
+      "backgroundColor": "#111111"
+    },
+
+    "platforms": [
+      "ios",
+      "android",
+      "web"
+    ],
+
+    "web": {
+      "bundler": "metro"
+    },
+
+    "ios": {
+  "bundleIdentifier": "com.schubertjoe.monocular",
+  "buildNumber": "101"
+  "supportsTablet": true,
+      "infoPlist": {
+        "ITSAppUsesNonExemptEncryption": false,
+        "NSPhotoLibraryUsageDescription": "Monocular needs photo access so you can select images.",
+        "NSPhotoLibraryAddUsageDescription": "Monocular needs permission to save rendered images."
+      },
+    }
+
+    "android": {
+      "package": "com.schubertjoe.monocular",
+      "adaptiveIcon": {
+        "foregroundImage": "./assets/adaptive-icon.png",
+        "backgroundColor": "#111111"
+      }
+    },
+
+    "extra": {
+      "eas": {
+        "projectId": "62149eae-43a2-4b78-85ff-2bac7d23f305"
+      }
+    }
+  }
+}
+
+├─ File: /Users/joeschubert/monocular-new/app.json
+└─ Cause: SyntaxError: JSON5: invalid character '\"' at 30:3
+  28 |   "bundleIdentifier": "com.schubertjoe.monocular",
+  29 |   "buildNumber": "101"
+> 30 |   "supportsTablet": true,
+     |   ^
+  31 |       "infoPlist": {
+  32 |         "ITSAppUsesNonExemptEncryption": false,
+  33 |         "NSPhotoLibraryUsageDescription": "Monocular needs photo access so you can select images.",
+    at parseJsonString (/Users/joeschubert/monocular-new/node_modules/@expo/json-file/build/JsonFile.js:198:19)
+    at JsonFile.read (/Users/joeschubert/monocular-new/node_modules/@expo/json-file/build/JsonFile.js:160:12)
+    at getStaticConfig (/Users/joeschubert/monocular-new/node_modules/@expo/config/build/getConfig.js:64:38)
+    at getConfig (/Users/joeschubert/monocular-new/node_modules/@expo/config/build/Config.js:206:85)
+    at configAsync (/Users/joeschubert/monocular-new/node_modules/@expo/cli/build/src/config/configAsync.js:156:60)
+    at expoConfig (/Users/joeschubert/monocular-new/node_modules/@expo/cli/build/src/config/index.js:89:12)
