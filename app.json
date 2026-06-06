@@ -26,14 +26,14 @@
 
     "ios": {
   "bundleIdentifier": "com.schubertjoe.monocular",
-  "buildNumber": "101"
-  "supportsTablet": true,
+  "buildNumber": "102",
+"supportsTablet": true,
       "infoPlist": {
         "ITSAppUsesNonExemptEncryption": false,
         "NSPhotoLibraryUsageDescription": "Monocular needs photo access so you can select images.",
         "NSPhotoLibraryAddUsageDescription": "Monocular needs permission to save rendered images."
       }
-    },
+        },
 
     "android": {
       "package": "com.schubertjoe.monocular",
