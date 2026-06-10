@@ -14,7 +14,7 @@ import {
 import * as ImagePicker from "expo-image-picker";
 import * as MediaLibrary from "expo-media-library";
 import * as FileSystem from "expo-file-system";
-import { requestPurchase } from "expo-iap";
+import * as IAP from "expo-iap";
 
 const API_URL = "https://monocular-server.onrender.com";
 const PRODUCT_ID = "monocular_pro_monthly";
@@ -35,7 +35,7 @@ export default function App() {
     setBuying(true);
     setMessage("Opening subscription...");
 
-    await requestPurchase({
+    await IAP.requestPurchase({
       request: {
         ios: {
           sku: PRODUCT_ID,
