@@ -157,8 +157,7 @@ subscribed) {
   }
 
   if (!subscribed) {
-    const product = products && products.length > 0 ? products[0] : null;
-    const price = product?.localizedPrice || "$19.99/month";
+    const price = "$19.99/month";
 
     return (
       <ScrollView style={styles.page} contentContainerStyle={styles.content}>
