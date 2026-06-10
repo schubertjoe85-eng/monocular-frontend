@@ -332,7 +332,7 @@ const styles = StyleSheet.create({
   },
   logoCircleOuter: {
     position: "absolute",
-    width: 72,∑
+    width: 72,
     height: 72,
     borderRadius: 36,
     borderWidth: 2,
