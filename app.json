@@ -1,41 +1,33 @@
 {
   "expo": {
-  "name": "Monocular",
-  "slug": "monocular",
-  "version": "1.0.0",
-  "icon": "./assets/icon.png",
-
-    
-
+    "name": "Monocular",
+    "slug": "monocular",
+    "version": "1.0.0",
+    "icon": "./assets/icon.png",
     "userInterfaceStyle": "dark",
-
     "splash": {
       "image": "./assets/splash.png",
       "resizeMode": "contain",
       "backgroundColor": "#111111"
     },
-
     "platforms": [
       "ios",
       "android",
       "web"
     ],
-
     "web": {
       "bundler": "metro"
     },
-
     "ios": {
-  "bundleIdentifier": "com.schubertjoe.monocular",
-  "buildNumber": "103",
-"supportsTablet": true,
+      "bundleIdentifier": "com.schubertjoe.monocular",
+      "buildNumber": "104nano app.config.js",
+      "supportsTablet": true,
       "infoPlist": {
         "ITSAppUsesNonExemptEncryption": false,
-        "NSPhotoLibraryUsageDescription": "Monocular needs photo access so you can select images.",
-        "NSPhotoLibraryAddUsageDescription": "Monocular needs permission to save rendered images."
+        "NSPhotoLibraryUsageDescription": "Monocular uses your photo library so you can select drawings, plans, or project images to create architectural-style renders.",
+        "NSPhotoLibraryAddUsageDescription": "Monocular saves finished renders to your photo library so you can access and share them later."
       }
-        },
-
+    },
     "android": {
       "package": "com.schubertjoe.monocular",
       "adaptiveIcon": {
@@ -43,11 +35,13 @@
         "backgroundColor": "#111111"
       }
     },
-
     "extra": {
       "eas": {
         "projectId": "62149eae-43a2-4b78-85ff-2bac7d23f305"
       }
-    }
+    },
+    "plugins": [
+      "expo-iap"
+    ]
   }
 }

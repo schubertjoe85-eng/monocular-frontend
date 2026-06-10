@@ -14,7 +14,7 @@ import {
 import * as ImagePicker from "expo-image-picker";
 import * as MediaLibrary from "expo-media-library";
 import * as FileSystem from "expo-file-system";
-
+import { requestPurchase } from "expo-iap";
 
 const API_URL = "https://monocular-server.onrender.com";
 const PRODUCT_ID = "monocular_pro_monthly";
@@ -26,11 +26,31 @@ export default function App() {
   const [resultImage, setResultImage] = useState(null);
   const [loading, setLoading] = useState(false);
   const [message, setMessage] = useState("");
-  const [subscribed, setSubscribed] = useState(true);
+  const [subscribed, setSubscribed] = useState(false); 
   const [checkingSub, setCheckingSub] = useState(false);
   const [buying, setBuying] = useState(false);
 
-  
+  async function buySubscription() {
+  try {
+    setBuying(true);
+    setMessage("Opening subscription...");
+
+    await requestPurchase({
+      request: {
+        ios: {
+          sku: PRODUCT_ID,
+        },
+      },
+    });
+
+    setSubscribed(true);
+    setMessage("Subscription active.");
+  } catch (error) {
+    setMessage("Subscription cancelled or failed.");
+  } finally {
+    setBuying(false);
+  }
+}
 
   async function pickImage() {
     try {
@@ -53,7 +73,8 @@ export default function App() {
   }
 
   async function renderImage() {
-    if (!subscribed) {
+    if (!
+subscribed) {
       setMessage("Subscribe to render.");
       return;
     }
@@ -162,7 +183,13 @@ export default function App() {
           </Text>
 
           <Text style={styles.price}>{price}</Text>
+<Text style={styles.paywallText}>
+  Auto-renewing monthly subscription.
+</Text>
 
+<Text style={styles.paywallText}>
+  Terms of Use: https://www.apple.com/legal/internet-services/itunes/dev/stdeula/
+</Text>
           <TouchableOpacity
             style={[styles.renderButton, buying ? styles.disabled : null]}
             onPress={buySubscription}
