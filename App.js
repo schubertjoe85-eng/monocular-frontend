@@ -26,8 +26,8 @@ export default function App() {
   const [resultImage, setResultImage] = useState(null);
   const [loading, setLoading] = useState(false);
   const [message, setMessage] = useState("");
-  const [subscribed, setSubscribed] = useState(false); 
-  const [checkingSub, setCheckingSub] = useState(false);
+  const [subscribed, setSubscribed] = useState(false);
+const [checkingSub, setCheckingSub] = useState(false);
   const [buying, setBuying] = useState(false);
 
   async function buySubscription() {
@@ -332,7 +332,7 @@ const styles = StyleSheet.create({
   },
   logoCircleOuter: {
     position: "absolute",
-    width: 72,
+    width: 72,∑
     height: 72,
     borderRadius: 36,
     borderWidth: 2,
