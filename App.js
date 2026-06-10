@@ -1,4 +1,4 @@
-const [subscribed, setSubscribed] = useState(true);
+
 import {
   ActivityIndicator,
   Alert,
