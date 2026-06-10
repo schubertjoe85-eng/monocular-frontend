@@ -35,8 +35,18 @@ export default function App() {
     setBuying(true);
     setMessage("Opening subscription...");
 
-    await Linking.openURL("itms-apps://apps.apple.com/account/subscriptions");
-setMessage("Subscription screen opened.");
+    await Linking.openURL(
+      "itms-apps://apps.apple.com/account/subscriptions"
+    );
+
+    setMessage("Subscription screen opened.");
+  } catch (error) {
+    setMessage("Subscription cancelled or failed.");
+  } finally {
+    setBuying(false);
+  }
+}
+
 
   async function pickImage() {
     try {
