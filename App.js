@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from "react";
+const [subscribed, setSubscribed] = useState(true);
 import {
   ActivityIndicator,
   Alert,
