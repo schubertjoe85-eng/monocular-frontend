@@ -1,9 +1,9 @@
-cd monocular-new
-nano App.js
-import React, { useState } from "react";
+
 import {
   ActivityIndicator,
+  Alert,
   Image,
+  Platform,
   ScrollView,
   StyleSheet,
   Text,
@@ -14,8 +14,10 @@ import {
 import * as ImagePicker from "expo-image-picker";
 import * as MediaLibrary from "expo-media-library";
 import * as FileSystem from "expo-file-system";
+import * as Linking from "expo-linking";
 
 const API_URL = "https://monocular-server.onrender.com";
+const PRODUCT_ID = "monocular_pro_monthly";
 
 export default function App() {
   const [prompt, setPrompt] = useState("");
@@ -24,6 +26,27 @@ export default function App() {
   const [resultImage, setResultImage] = useState(null);
   const [loading, setLoading] = useState(false);
   const [message, setMessage] = useState("");
+  const [subscribed, setSubscribed] = useState(false);
+constcheckingSub, setCheckingSub] = useState(false);
+  const [buying, setBuying] = useState(false);
+
+  async function buySubscription() {
+  try {
+    setBuying(true);
+    setMessage("Opening subscription...");
+
+    await Linking.openURL(
+      "itms-apps://apps.apple.com/account/subscriptions"
+    );
+
+    setMessage("Subscription screen opened.");
+  } catch (error) {
+    setMessage("Subscription cancelled or failed.");
+  } finally {
+    setBuying(false);
+  }
+}
+
 
   async function pickImage() {
     try {
@@ -40,4 +63,51 @@ export default function App() {
         setResultImage(null);
         setMessage("Image loaded.");
       }
+    } catch {
+      setMessage("Image upload failed.");
     }
+  }
+
+  async function renderImage() {
+    if (!
+subscribed) {
+      setMessage("Subscribe to render.");
+      return;
+    }
+
+    if (!prompt.trim() && !imageBase64) {
+      setMessage("Add a brief or upload an image first.");
+      return;
+    }
+
+    try {
+      setLoading(true);
+      setMessage("Rendering...");
+      setResultImage(null);
+
+      const response = await fetch(`${API_URL}/render`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          prompt,
+          imageBase64,
+          mode: "render",
+        }),
+      });
+
+      const data = await response.json();
+
+      if (data.image) {
+        setResultImage(data.image);
+        setMessage("Render complete.");
+      } else {
+  },
+  resultImage: {
+    width: "100%",
+    height: 430,
+    borderRadius: 24,
+    backgroundColor: "#0D1A10",
+  },
+});
