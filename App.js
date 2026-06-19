@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from "react";
+import React, { useState, useRef } from "react";
 import {
   ActivityIndicator,
   Image,
@@ -9,105 +9,36 @@ import {
   TouchableOpacity,
   View,
 } from "react-native";
+import { Video } from "expo-av";
 import * as ImagePicker from "expo-image-picker";
 import * as MediaLibrary from "expo-media-library";
 import * as FileSystem from "expo-file-system";
-import { useIAP } from "expo-iap";
 
 const API_URL = "https://monocular-server.onrender.com";
-const PRODUCT_ID = "monocular_pro_monthly";
 
 export default function App() {
+  const [tab, setTab] = useState("image"); // "image" | "video"
+
   const [prompt, setPrompt] = useState("");
   const [selectedImage, setSelectedImage] = useState(null);
   const [imageBase64, setImageBase64] = useState(null);
+
   const [resultImage, setResultImage] = useState(null);
   const [loading, setLoading] = useState(false);
+  const [saving, setSaving] = useState(false);
+
+  const [videoLoading, setVideoLoading] = useState(false);
+  const [videoStatus, setVideoStatus] = useState("");
+  const [resultVideoUrl, setResultVideoUrl] = useState(null);
+
   const [message, setMessage] = useState("");
-  const [subscribed, setSubscribed] = useState(false);
-  const [checkingSub, setCheckingSub] = useState(false);
-  const [buying, setBuying] = useState(false);
-
-  
-
-  useEffect(() => {
-    setCheckingSub(false);
-  }, []);
-
-  useEffect(() => {
-    async function completePurchase() {
-      if (!currentPurchase) return;
-
-      try {
-        await finishTransaction({
-          purchase: currentPurchase,
-          isConsumable: false,
-        });
-
-        setSubscribed(true);
-        setMessage("Subscription active.");
-      } catch (error) {
-        console.log("Finish transaction error:", error);
-        setSubscribed(true);
-        setMessage("Subscription active.");
-      } finally {
-        setBuying(false);
-      }
-    }
-
-    completePurchase();
-  }, [currentPurchase]);
-
-  useEffect(() => {
-    if (currentPurchaseError) {
-      console.log("Purchase error:", currentPurchaseError);
-      setBuying(false);
-      setMessage("Purchase cancelled or failed.");
-    }
-  }, [currentPurchaseError]);
-
-  async function buySubscription() {
-    try {
-      setBuying(true);
-      setMessage("Opening Apple subscription...");
-
-      if (!connected) {
-        setBuying(false);
-        setMessage("Store connection not ready. Try again in a moment.");
-        return;
-      }
-
-      useEffect(() => {
-  async function loadProducts() {
-    await fetchProducts();
-  }
-
-  loadProducts();
-}, []);
-      await requestPurchase({
-        type: "subs",
-        request: {
-          ios: {
-            sku: PRODUCT_ID,
-          },
-        },
-      });
-    } catch (error) {
-      console.log("Purchase start error:", error);
-      setBuying(false);
-      setMessage(error?.message || "Could not start subscription.");
-    }
-  }
-
-  async function restoreSubscription() {
-    setMessage("Restore purchase will activate after Apple confirms the subscription.");
-  }
+  const pollRef = useRef(null);
 
   async function pickImage() {
     try {
       const result = await ImagePicker.launchImageLibraryAsync({
         mediaTypes: ImagePicker.MediaTypeOptions.Images,
-        quality: 0.8,
+        quality: 0.9,
         base64: true,
       });
 
@@ -116,6 +47,7 @@ export default function App() {
         setSelectedImage(asset.uri);
         setImageBase64(asset.base64 || null);
         setResultImage(null);
+        setResultVideoUrl(null);
         setMessage("Image loaded.");
       }
     } catch (error) {
@@ -124,18 +56,7 @@ export default function App() {
     }
   }
 
- async function renderImage() {
-    
-    
-
+  async function renderImage() {
     if (!prompt.trim() && !imageBase64) {
-      setMessage("Add a brief or upload an image first.");
-      return;
-    }
+      setMessage("Add a
 
-    try {
-      setLoading(true);
-      setMessage("Rendering...");
-      setResultImage(null);
-
-      const response = await fetch(`${API_URL}/render`, {
