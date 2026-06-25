@@ -214,44 +214,31 @@ export default function App() {
     }
   }
 
-  function pollVideo(videoId) {
-    if (pollRef.current) clearInterval(pollRef.current);
-    pollRef.current = setInterval(async () => {
-      try {
-        const response = await fetch(API_URL + "/api/video/" + videoId);
-        const data = await response.json();
-        if (!data.ok) {
-          clearInterval(pollRef.current);
-          setVideoLoading(false);
-          setVideoStatus("");
-          setMessage(data.error || "Video status check failed.");
-          return;
-        }
-        const status = data.video?.status;
-        setVideoStatus("Status: " + (status || "processing") + "...");
-        if (status === "completed" || status === "succeeded") {
-          clearInterval(pollRef.current);
-          setVideoLoading(false);
-          setVideoStatus("");
-          setMessage("Finalising video...");
-          try {
-            const ur = await fetch(API_URL + "/api/video/" + videoId + "/url");
-            const ud = await ur.json();
-            setResultVideoUrl(ud.ok && ud.url ? ud.url : API_URL + "/api/video/" + videoId + "/content");
-            setMessage("Video render complete.");
-          } catch (e) {
-            setResultVideoUrl(API_URL + "/api/video/" + videoId + "/content");
-            setMessage("Video render complete.");
-          }
-        } else if (status === "failed" || status === "error") {
-          clearInterval(pollRef.current);
-          setVideoLoading(false);
-          setVideoStatus("");
-          setMessage("Video generation failed.");
-        }
-      } catch (error) {}
-    }, 4000);
-  }
+  if (status === "completed" || status === "succeeded") {
+  clearInterval(pollRef.current);
+  setVideoLoading(false);
+  setVideoStatus("Finalising video...");
+  
+  // Wait 3 seconds then fetch URL
+  setTimeout(async () => {
+    try {
+      const ur = await fetch(API_URL + "/api/video/" + videoId + "/url");
+      const ud = await ur.json();
+      if (ud.ok && ud.url) {
+        setResultVideoUrl(ud.url);
+        setMessage("Video render complete.");
+      } else {
+        // Fallback to content endpoint
+        setResultVideoUrl(API_URL + "/api/video/" + videoId + "/content");
+        setMessage("Video render complete.");
+      }
+    } catch (e) {
+      setResultVideoUrl(API_URL + "/api/video/" + videoId + "/content");
+      setMessage("Video render complete.");
+    }
+  }, 3000);
+}
+
 
   async function saveVideo() {
     if (!resultVideoUrl) { setMessage("No video to save."); return; }
