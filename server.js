@@ -2,6 +2,7 @@ import express from "express";
 import cors from "cors";
 import dotenv from "dotenv";
 import OpenAI from "openai";
+import * as fal from "@fal-ai/client";
 
 dotenv.config();
 
@@ -16,6 +17,8 @@ const openai = new OpenAI({
   timeout: 120000,
   maxRetries: 1,
 });
+
+fal.config({ credentials: process.env.FAL_API_KEY });
 
 const users = {};
 const FREE_RENDER_LIMIT = 5;
@@ -182,12 +185,84 @@ app.post("/render", async (req, res) => {
 
   } catch (error) {
     console.error("Render error:", error);
-
     if (error.code === "ETIMEDOUT" || error.message?.includes("timeout")) {
       return res.status(504).json({ ok: false, error: "Render timed out. Try a simpler image." });
     }
-
     return res.status(500).json({ ok: false, error: error.message || "Render failed." });
+  }
+});
+
+// VIDEO - Submit job
+app.post("/api/video", async (req, res) => {
+  req.setTimeout(60000);
+  res.setTimeout(60000);
+
+  try {
+    const { prompt, imageBase64 } = req.body || {};
+
+    if (!imageBase64) {
+      return res.status(400).json({ ok: false, error: "Upload an image first." });
+    }
+
+    // Upload image to fal storage
+    const imageBuffer = Buffer.from(imageBase64, "base64");
+    const imageBlob = new Blob([imageBuffer], { type: "image/png" });
+    const imageUrl = await fal.storage.upload(imageBlob);
+
+    // Submit video job
+    const { request_id } = await fal.queue.submit("fal-ai/kling-video/v1.6/pro/image-to-video", {
+      input: {
+        prompt: prompt || "Slow cinematic camera move around the building. Architectural walkthrough.",
+        image_url: imageUrl,
+        duration: "5",
+        aspect_ratio: "16:9",
+      },
+    });
+
+    return res.json({ ok: true, video: { id: request_id } });
+
+  } catch (error) {
+    console.error("Video submit error:", error);
+    return res.status(500).json({ ok: false, error: error.message || "Video submission failed." });
+  }
+});
+
+// VIDEO - Poll status
+app.get("/api/video/:id", async (req, res) => {
+  try {
+    const { id } = req.params;
+    const status = await fal.queue.status("fal-ai/kling-video/v1.6/pro/image-to-video", {
+      requestId: id,
+      logs: false,
+    });
+
+    return res.json({ ok: true, video: { id, status: status.status } });
+
+  } catch (error) {
+    console.error("Video status error:", error);
+    return res.status(500).json({ ok: false, error: error.message || "Status check failed." });
+  }
+});
+
+// VIDEO - Get URL
+app.get("/api/video/:id/url", async (req, res) => {
+  try {
+    const { id } = req.params;
+    const result = await fal.queue.result("fal-ai/kling-video/v1.6/pro/image-to-video", {
+      requestId: id,
+    });
+
+    const url = result?.video?.url || result?.data?.video?.url;
+
+    if (!url) {
+      return res.status(404).json({ ok: false, error: "No video URL yet." });
+    }
+
+    return res.json({ ok: true, url });
+
+  } catch (error) {
+    console.error("Video URL error:", error);
+    return res.status(500).json({ ok: false, error: error.message || "Could not get video URL." });
   }
 });
 

@@ -11,6 +11,7 @@
     "export:web": "expo export --platform web"
   },
   "dependencies": {
+    "@fal-ai/client": "^1.10.1",
     "@react-native-async-storage/async-storage": "1.23.1",
     "expo": "~52.0.0",
     "expo-av": "~15.0.2",
