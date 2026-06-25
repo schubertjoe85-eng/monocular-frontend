@@ -1,0 +1,45 @@
+cd ~/monocular-new
+cp App.js App.js.OLDbackup 2>/dev/null
+cat > App.js << 'CHUNK1'
+import React, { useState, useRef, useEffect } from "react";
+import {
+  ActivityIndicator,
+  Image,
+  Modal,
+  ScrollView,
+  StyleSheet,
+  Text,
+  TextInput,
+  TouchableOpacity,
+  View,
+} from "react-native";
+import { Video } from "expo-av";
+import * as ImagePicker from "expo-image-picker";
+import * as MediaLibrary from "expo-media-library";
+import * as FileSystem from "expo-file-system";
+import Purchases from "react-native-purchases";
+
+const API_URL = "https://monocular-server.onrender.com";
+const RC_API_KEY = "appl_jJKgQZQIYePcVeZnnwpGtHacrrB";
+const ENTITLEMENT_ID = "Monocular Pro";
+
+export default function App() {
+  const [tab, setTab] = useState("image");
+  const [prompt, setPrompt] = useState("");
+  const [selectedImage, setSelectedImage] = useState(null);
+  const [imageBase64, setImageBase64] = useState(null);
+  const [extraImages, setExtraImages] = useState([]);
+  const [resultImage, setResultImage] = useState(null);
+  const [loading, setLoading] = useState(false);
+  const [saving, setSaving] = useState(false);
+  const [videoLoading, setVideoLoading] = useState(false);
+  const [videoStatus, setVideoStatus] = useState("");
+  const [resultVideoUrl, setResultVideoUrl] = useState(null);
+  const [savingVideo, setSavingVideo] = useState(false);
+  const [message, setMessage] = useState("");
+  const pollRef = useRef(null);
+  const [isSubscribed, setIsSubscribed] = useState(false);
+  const [showPaywall, setShowPaywall] = useState(false);
+  const [purchasing, setPurchasing] = useState(false);
+CHUNK1
+echo "chunk1 ok"

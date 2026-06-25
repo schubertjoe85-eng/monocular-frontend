@@ -20,7 +20,7 @@
     },
     "ios": {
       "bundleIdentifier": "com.schubertjoe.monocular",
-      "buildNumber": "105nano app.config.js",
+      "buildNumber": "107nano app.config.js",
       "supportsTablet": true,
       "infoPlist": {
         "ITSAppUsesNonExemptEncryption": false,
@@ -39,6 +39,10 @@
       "eas": {
         "projectId": "62149eae-43a2-4b78-85ff-2bac7d23f305"
       }
-    },      
+    },
+    "plugins": [
+      "react-native-iap",
+      "expo-video"
+    ]
   }
 }
