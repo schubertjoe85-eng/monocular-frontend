@@ -267,9 +267,11 @@ export default function App() {
       const download = await FileSystem.downloadAsync(resultVideoUrl, fileUri);
       const asset = await MediaLibrary.createAssetAsync(download.uri);
       await MediaLibrary.createAlbumAsync("Monocular", asset, false);
-      setMessage("Video saved to Photos.");
     } catch (error) {
-      setMessage("Could not save video.");
+  console.error("Save video error:", error);
+  setMessage("Could not save video: " + error.message);
+}
+
     } finally {
       setSavingVideo(false);
     }
