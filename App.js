@@ -2,6 +2,7 @@ import React, { useState, useRef, useEffect } from "react";
 import {
   ActivityIndicator,
   Image,
+  Linking,
   Modal,
   ScrollView,
   StyleSheet,
@@ -284,10 +285,10 @@ export default function App() {
         <View style={styles.paywallOverlay}>
           <View style={styles.paywallCard}>
             <Text style={styles.paywallTitle}>MONOCULAR PRO</Text>
-            <Text style={styles.paywallPrice}>$19.99 / month</Text>
-            <Text style={styles.paywallBody}>Unlock unlimited photorealistic renders and 3D walkthrough videos.</Text>
+            <Text style={styles.paywallPrice}>$19.99 / month — auto-renewing</Text>
+            <Text style={styles.paywallBody}>Subscribe to unlock unlimited photorealistic architectural renders and 3D walkthrough videos. Subscription required to access all features.</Text>
             <TouchableOpacity style={[styles.buttonLight, purchasing && styles.disabled]} onPress={buySubscription} disabled={purchasing}>
-              {purchasing ? <ActivityIndicator color="#fff" /> : <Text style={styles.buttonLightText}>SUBSCRIBE</Text>}
+              {purchasing ? <ActivityIndicator color="#fff" /> : <Text style={styles.buttonLightText}>SUBSCRIBE — $19.99/MONTH</Text>}
             </TouchableOpacity>
             <TouchableOpacity onPress={restorePurchases} disabled={purchasing}>
               <Text style={styles.paywallLink}>Restore purchases</Text>
@@ -295,6 +296,13 @@ export default function App() {
             <TouchableOpacity onPress={() => setShowPaywall(false)}>
               <Text style={styles.paywallLink}>Not now</Text>
             </TouchableOpacity>
+            <TouchableOpacity onPress={() => Linking.openURL("https://monocular-server.onrender.com/privacy.html")}>
+              <Text style={styles.paywallLink}>Privacy Policy</Text>
+            </TouchableOpacity>
+            <TouchableOpacity onPress={() => Linking.openURL("https://www.apple.com/legal/internet-services/itunes/dev/stdeula/")}>
+              <Text style={styles.paywallLink}>Terms of Use</Text>
+            </TouchableOpacity>
+            <Text style={styles.paywallSmall}>Payment charged to Apple ID at confirmation. Subscription renews automatically unless cancelled at least 24 hours before the renewal date.</Text>
           </View>
         </View>
       </Modal>
@@ -421,4 +429,5 @@ const styles = StyleSheet.create({
   paywallPrice: { color: "#fff", fontSize: 18, fontWeight: "700", marginBottom: 16 },
   paywallBody: { color: "#aaa", fontSize: 14, textAlign: "center", marginBottom: 22, lineHeight: 20 },
   paywallLink: { color: "#888", fontSize: 13, marginTop: 16, textAlign: "center" },
+  paywallSmall: { color: "#555", fontSize: 11, textAlign: "center", marginTop: 16, lineHeight: 16 },
 });
