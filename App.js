@@ -207,6 +207,7 @@ export default function App() {
         setVideoLoading(false);
         return;
       }
+      console.log("Video ID:", data.video.id);
       pollVideo(data.video.id);
     } catch (error) {
       setMessage("Server connection failed.");
@@ -214,30 +215,7 @@ export default function App() {
     }
   }
 
-  if (status === "completed" || status === "succeeded") {
-  clearInterval(pollRef.current);
-  setVideoLoading(false);
-  setVideoStatus("Finalising video...");
-  
-  // Wait 3 seconds then fetch URL
-  setTimeout(async () => {
-    try {
-      const ur = await fetch(API_URL + "/api/video/" + videoId + "/url");
-      const ud = await ur.json();
-      if (ud.ok && ud.url) {
-        setResultVideoUrl(ud.url);
-        setMessage("Video render complete.");
-      } else {
-        // Fallback to content endpoint
-        setResultVideoUrl(API_URL + "/api/video/" + videoId + "/content");
-        setMessage("Video render complete.");
-      }
-    } catch (e) {
-      setResultVideoUrl(API_URL + "/api/video/" + videoId + "/content");
-      setMessage("Video render complete.");
-    }
-  }, 3000);
-}
+
 
 
   async function saveVideo() {
