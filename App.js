@@ -264,7 +264,7 @@ export default function App() {
       const permission = await MediaLibrary.requestPermissionsAsync();
       if (!permission.granted) { setMessage("Photos permission required."); return; }
       const fileUri = FileSystem.cacheDirectory + "monocular-video-" + Date.now() + ".mp4";
-      const download = await FileSystem.downloadAsync(resultVideoUrl.split("?")[0], fileUri);
+      const download = await FileSystem.downloadAsync(resultVideoUrl, fileUri);
       const asset = await MediaLibrary.createAssetAsync(download.uri);
       await MediaLibrary.createAlbumAsync("Monocular", asset, false);
       setMessage("Video saved to Photos.");
