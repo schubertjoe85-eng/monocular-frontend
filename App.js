@@ -23,8 +23,6 @@ const ENTITLEMENT_ID = "Monocular Pro";
 const MODES = [
   { key: "render", label: "EXTERIOR" },
   { key: "interior", label: "INTERIOR" },
-  { key: "elevation", label: "ELEVATION" },
-  { key: "site", label: "SITE" },
 ];
 
 export default function App() {
@@ -64,10 +62,8 @@ export default function App() {
     try {
       setPurchasing(true);
       const offerings = await Purchases.getOfferings();
-      const pkg =
-        offerings.current && offerings.current.availablePackages.length > 0
-          ? offerings.current.availablePackages[0]
-          : null;
+      const pkg = offerings.current && offerings.current.availablePackages.length > 0
+        ? offerings.current.availablePackages[0] : null;
       if (!pkg) { setMessage("No subscription available right now."); return; }
       const { customerInfo } = await Purchases.purchasePackage(pkg);
       if (customerInfo.entitlements.active[ENTITLEMENT_ID]) {
@@ -198,7 +194,7 @@ export default function App() {
       const response = await fetch(API_URL + "/api/video", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ prompt, imageBase64, images, seconds: "8", size: "1280x720" }),
+        body: JSON.stringify({ prompt, imageBase64, images, mode }),
       });
       const data = await response.json();
       if (!data.ok || !data.video?.id) {
@@ -207,7 +203,6 @@ export default function App() {
         setVideoLoading(false);
         return;
       }
-      console.log("Video ID:", data.video.id);
       pollVideo(data.video.id);
     } catch (error) {
       setMessage("Server connection failed.");
@@ -215,8 +210,51 @@ export default function App() {
     }
   }
 
-
-
+  function pollVideo(videoId) {
+    if (pollRef.current) clearInterval(pollRef.current);
+    pollRef.current = setInterval(async () => {
+      try {
+        const response = await fetch(API_URL + "/api/video/" + videoId);
+        const data = await response.json();
+        if (!data.ok) {
+          clearInterval(pollRef.current);
+          setVideoLoading(false);
+          setVideoStatus("");
+          setMessage(data.error || "Video status check failed.");
+          return;
+        }
+        const status = data.video?.status;
+        setVideoStatus("Status: " + (status || "processing") + "...");
+        if (status === "completed" || status === "succeeded") {
+          clearInterval(pollRef.current);
+          setVideoLoading(false);
+          setVideoStatus("");
+          setMessage("Finalising video...");
+          setTimeout(async () => {
+            try {
+              const ur = await fetch(API_URL + "/api/video/" + videoId + "/url");
+              const ud = await ur.json();
+              if (ud.ok && ud.url) {
+                setResultVideoUrl(ud.url);
+                setMessage("Video render complete.");
+              } else {
+                setResultVideoUrl(API_URL + "/api/video/" + videoId + "/content");
+                setMessage("Video render complete.");
+              }
+            } catch (e) {
+              setResultVideoUrl(API_URL + "/api/video/" + videoId + "/content");
+              setMessage("Video render complete.");
+            }
+          }, 3000);
+        } else if (status === "failed" || status === "error") {
+          clearInterval(pollRef.current);
+          setVideoLoading(false);
+          setVideoStatus("");
+          setMessage("Video generation failed.");
+        }
+      } catch (error) {}
+    }, 4000);
+  }
 
   async function saveVideo() {
     if (!resultVideoUrl) { setMessage("No video to save."); return; }
@@ -277,19 +315,17 @@ export default function App() {
 
         {selectedImage && <Image source={{ uri: selectedImage }} style={styles.preview} />}
 
-        {tab === "image" && (
-          <View style={styles.modeRow}>
-            {MODES.map(m => (
-              <TouchableOpacity
-                key={m.key}
-                style={[styles.modeButton, mode === m.key && styles.modeButtonActive]}
-                onPress={() => setMode(m.key)}
-              >
-                <Text style={[styles.modeText, mode === m.key && styles.modeTextActive]}>{m.label}</Text>
-              </TouchableOpacity>
-            ))}
-          </View>
-        )}
+        <View style={styles.modeRow}>
+          {MODES.map(m => (
+            <TouchableOpacity
+              key={m.key}
+              style={[styles.modeButton, mode === m.key && styles.modeButtonActive]}
+              onPress={() => setMode(m.key)}
+            >
+              <Text style={[styles.modeText, mode === m.key && styles.modeTextActive]}>{m.label}</Text>
+            </TouchableOpacity>
+          ))}
+        </View>
 
         <TextInput
           style={styles.input}
@@ -362,8 +398,8 @@ const styles = StyleSheet.create({
   tabButtonActive: { backgroundColor: "#2E4D3A" },
   tabText: { color: "#888", fontWeight: "900", letterSpacing: 1, fontSize: 12 },
   tabTextActive: { color: "#fff" },
-  modeRow: { flexDirection: "row", flexWrap: "wrap", marginBottom: 14, gap: 8 },
-  modeButton: { paddingVertical: 8, paddingHorizontal: 14, borderRadius: 10, backgroundColor: "#1a1a1a", borderWidth: 1, borderColor: "#333" },
+  modeRow: { flexDirection: "row", marginBottom: 14, gap: 8 },
+  modeButton: { flex: 1, paddingVertical: 10, borderRadius: 10, backgroundColor: "#1a1a1a", borderWidth: 1, borderColor: "#333", alignItems: "center" },
   modeButtonActive: { backgroundColor: "#2E4D3A", borderColor: "#2E4D3A" },
   modeText: { color: "#888", fontWeight: "900", letterSpacing: 1, fontSize: 11 },
   modeTextActive: { color: "#fff" },
@@ -386,4 +422,3 @@ const styles = StyleSheet.create({
   paywallBody: { color: "#aaa", fontSize: 14, textAlign: "center", marginBottom: 22, lineHeight: 20 },
   paywallLink: { color: "#888", fontSize: 13, marginTop: 16, textAlign: "center" },
 });
-
