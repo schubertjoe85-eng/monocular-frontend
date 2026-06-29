@@ -296,10 +296,12 @@ export default function App() {
             <TouchableOpacity onPress={() => setShowPaywall(false)}>
               <Text style={styles.paywallLink}>Not now</Text>
             </TouchableOpacity>
-            <TouchableOpacity onPress={() => Linking.openURL("https://monocular-server.onrender.com/privacy.html")}>
+            <TouchableOpacity onPress={() => Linking.openURL("https://monocular-opal.vercel.app/privacy.html")}
+
               <Text style={styles.paywallLink}>Privacy Policy</Text>
             </TouchableOpacity>
-            <TouchableOpacity onPress={() => Linking.openURL("https://www.apple.com/legal/internet-services/itunes/dev/stdeula/")}>
+            <TouchableOpacity onPress={() => Linking.openURL("https://monocular-opal.vercel.app/terms.html")}
+
               <Text style={styles.paywallLink}>Terms of Use</Text>
             </TouchableOpacity>
             <Text style={styles.paywallSmall}>Payment charged to Apple ID at confirmation. Subscription renews automatically unless cancelled at least 24 hours before the renewal date.</Text>
