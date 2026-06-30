@@ -10,20 +10,114 @@
   <p style="color:#C9894B;font-size:20px;font-weight:bold;">Architectural rendering, refined.</p>
 
   <div style="max-width:760px;margin:30px auto;background:#171B16;border:1px solid #6E8B3D;border-radius:24px;padding:24px;">
-    <input id="file" type="file" accept="image/*" style="color:white;width:100%;margin-bottom:20px;">
-    <img id="preview" style="display:none;width:100%;max-height:420px;object-fit:contain;border-radius:20px;margin-bottom:20px;">
 
-    <textarea id="prompt" placeholder="Describe materials, light, landscape, atmosphere..." style="width:100%;height:150px;border-radius:16px;padding:16px;font-size:16px;box-sizing:border-box;background:#10110F;color:white;"></textarea>
+    <div id="emailGate">
+      <p style="color:#ccc;">Enter your email to continue</p>
+      <input id="emailInput" type="email" placeholder="you@example.com" style="width:100%;padding:14px;border-radius:14px;border:1px solid #6E8B3D;background:#10110F;color:white;font-size:16px;box-sizing:border-box;margin-bottom:14px;">
+      <button onclick="setEmail()" style="width:100%;padding:16px;border-radius:16px;border:0;background:#6E8B3D;color:white;font-size:16px;font-weight:bold;">CONTINUE</button>
+    </div>
 
-    <button onclick="renderImage()" style="width:100%;margin-top:20px;padding:18px;border-radius:18px;border:0;background:#C9894B;color:white;font-size:18px;font-weight:bold;">RENDER</button>
+    <div id="mainApp" style="display:none;">
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:20px;">
+        <span id="emailDisplay" style="color:#888;font-size:13px;"></span>
+        <span id="creditsDisplay" style="color:#C9894B;font-weight:bold;"></span>
+      </div>
 
-    <p id="msg"></p>
-    <img id="result" style="display:none;width:100%;border-radius:20px;margin-top:20px;">
+      <div id="buyCredits" style="display:none;margin-bottom:24px;padding:20px;background:#10110F;border-radius:18px;border:1px solid #6E8B3D;">
+        <p style="color:#fff;font-weight:bold;margin-top:0;">Buy render credits</p>
+        <button onclick="buy(1)" style="width:100%;margin-bottom:10px;padding:14px;border-radius:14px;border:0;background:#C9894B;color:white;font-weight:bold;">1 RENDER — $2.00</button>
+        <button onclick="buy(10)" style="width:100%;margin-bottom:10px;padding:14px;border-radius:14px;border:0;background:#C9894B;color:white;font-weight:bold;">10 RENDERS — $12.00</button>
+        <button onclick="buy(30)" style="width:100%;padding:14px;border-radius:14px;border:0;background:#C9894B;color:white;font-weight:bold;">30 RENDERS — $29.00</button>
+      </div>
+
+      <input id="file" type="file" accept="image/*" style="color:white;width:100%;margin-bottom:20px;">
+      <img id="preview" style="display:none;width:100%;max-height:420px;object-fit:contain;border-radius:20px;margin-bottom:20px;">
+
+      <textarea id="prompt" placeholder="Describe materials, light, landscape, atmosphere..." style="width:100%;height:150px;border-radius:16px;padding:16px;font-size:16px;box-sizing:border-box;background:#10110F;color:white;"></textarea>
+
+      <button onclick="renderImage()" style="width:100%;margin-top:20px;padding:18px;border-radius:18px;border:0;background:#C9894B;color:white;font-size:18px;font-weight:bold;">RENDER</button>
+
+      <p id="msg"></p>
+      <img id="result" style="display:none;width:100%;border-radius:20px;margin-top:20px;">
+    </div>
   </div>
 
 <script>
 const API_URL = "https://monocular-server.onrender.com";
+const PAYMENT_LINKS = {
+  1: "https://buy.stripe.com/8x2cN4bEkaGW0EEdaz43S01",
+  10: "https://buy.stripe.com/fZuaEW4bS8yO9ba6Mb43S02",
+  30: "https://buy.stripe.com/7sYfZgcIo2aq9bab2r43S00"
+};
+
 let imageBase64 = "";
+let userEmail = localStorage.getItem("monocular_email") || "";
+
+window.addEventListener("load", function() {
+  const params = new URLSearchParams(window.location.search);
+  const sessionId = params.get("session_id");
+  if (sessionId) {
+    handleCheckoutSuccess(sessionId);
+  } else if (userEmail) {
+    showApp();
+  }
+});
+
+async function handleCheckoutSuccess(sessionId) {
+  document.getElementById("msg") && (document.getElementById("msg").innerText = "");
+  try {
+    const response = await fetch(API_URL + "/api/checkout-success", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ sessionId })
+    });
+    const data = await response.json();
+    if (data.ok && data.email) {
+      userEmail = data.email;
+      localStorage.setItem("monocular_email", userEmail);
+      window.history.replaceState({}, document.title, window.location.pathname);
+      showApp();
+    }
+  } catch (err) {
+    console.error("Checkout verification failed", err);
+  }
+}
+
+function setEmail() {
+  const val = document.getElementById("emailInput").value.trim();
+  if (!val || !val.includes("@")) {
+    alert("Enter a valid email.");
+    return;
+  }
+  userEmail = val;
+  localStorage.setItem("monocular_email", userEmail);
+  showApp();
+}
+
+async function showApp() {
+  document.getElementById("emailGate").style.display = "none";
+  document.getElementById("mainApp").style.display = "block";
+  document.getElementById("emailDisplay").innerText = userEmail;
+  await refreshCredits();
+}
+
+async function refreshCredits() {
+  try {
+    const response = await fetch(API_URL + "/api/credits/" + encodeURIComponent(userEmail));
+    const data = await response.json();
+    const balance = data.ok ? data.balance : 0;
+    document.getElementById("creditsDisplay").innerText = balance + " credit" + (balance === 1 ? "" : "s");
+    document.getElementById("buyCredits").style.display = balance > 0 ? "none" : "block";
+  } catch (err) {
+    document.getElementById("creditsDisplay").innerText = "—";
+  }
+}
+
+function buy(pack) {
+  const link = PAYMENT_LINKS[pack];
+  const returnUrl = encodeURIComponent(window.location.origin + window.location.pathname);
+  window.location.href = link + "?prefilled_email=" + encodeURIComponent(userEmail) + "&client_reference_id=" + encodeURIComponent(userEmail);
+}
 
 document.getElementById("file").addEventListener("change", function(e) {
   const file = e.target.files[0];
@@ -48,10 +142,28 @@ async function renderImage() {
   const msg = document.getElementById("msg");
   const result = document.getElementById("result");
 
-  msg.innerText = "Rendering...";
+  msg.innerText = "Checking credits...";
   result.style.display = "none";
 
   try {
+    const creditCheck = await fetch(API_URL + "/api/use-credit", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ email: userEmail })
+    });
+    const creditData = await creditCheck.json();
+
+    if (!creditData.ok) {
+      msg.innerText = creditData.error || "No credits remaining. Buy more below.";
+      document.getElementById("buyCredits").style.display = "block";
+      return;
+    }
+
+    document.getElementById("creditsDisplay").innerText = creditData.balance + " credit" + (creditData.balance === 1 ? "" : "s");
+    if (creditData.balance === 0) document.getElementById("buyCredits").style.display = "block";
+
+    msg.innerText = "Rendering...";
+
     const response = await fetch(API_URL + "/render", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
