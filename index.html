@@ -67,7 +67,8 @@
         <img id="result" style="display:none;width:100%;border-radius:18px;margin-top:16px;">
         <a id="downloadLink" download="monocular-render.png" style="display:none;width:100%;margin-top:10px;padding:14px;border-radius:14px;background:#222;color:white;font-weight:900;letter-spacing:1px;font-size:13px;text-decoration:none;box-sizing:border-box;">DOWNLOAD IMAGE</a>
 
-        <video id="resultVideo" controls style="display:none;width:100%;border-radius:18px;margin-top:16px;"></video>
+        <video id="resultVideo" controls playsinline style="display:none;width:100%;border-radius:18px;margin-top:16px;"></video>
+        <a id="downloadVideoLink" download="monocular-video.mp4" target="_blank" style="display:none;width:100%;margin-top:10px;padding:14px;border-radius:14px;background:#222;color:white;font-weight:900;letter-spacing:1px;font-size:13px;text-decoration:none;box-sizing:border-box;">SAVE VIDEO</a>
       </div>
     </div>
   </div>
@@ -250,8 +251,9 @@ async function renderImage() {
   }
 
   result.style.display = "none";
-  document.getElementById("downloadLink").style.display = "none";
-  document.getElementById("resultVideo").style.display  = "none";
+  document.getElementById("downloadLink").style.display      = "none";
+  document.getElementById("resultVideo").style.display       = "none";
+  document.getElementById("downloadVideoLink").style.display = "none";
   lastResultDataUrl = null;
 
   try {
@@ -312,8 +314,9 @@ async function renderVideo() {
   }
 
   resultVideo.style.display = "none";
-  document.getElementById("result").style.display       = "none";
-  document.getElementById("downloadLink").style.display = "none";
+  document.getElementById("result").style.display            = "none";
+  document.getElementById("downloadLink").style.display      = "none";
+  document.getElementById("downloadVideoLink").style.display = "none";
 
   try {
     msg.innerText = "Checking credits...";
@@ -362,19 +365,21 @@ function pollVideo(videoId) {
         clearInterval(videoPollInterval);
         msg.innerText = "Finalising video…";
         setTimeout(async function () {
+          const vid = document.getElementById("resultVideo");
+          const dl  = document.getElementById("downloadVideoLink");
+          let src;
           try {
-            const ur  = await fetch(API_URL + "/api/video/" + videoId + "/url");
-            const ud  = await ur.json();
-            const vid = document.getElementById("resultVideo");
-            vid.src           = (ud.ok && ud.url) ? ud.url : API_URL + "/api/video/" + videoId + "/content";
-            vid.style.display = "block";
-            msg.innerText = "Video complete.";
+            const ur = await fetch(API_URL + "/api/video/" + videoId + "/url");
+            const ud = await ur.json();
+            src = (ud.ok && ud.url) ? ud.url : API_URL + "/api/video/" + videoId + "/content";
           } catch {
-            const vid = document.getElementById("resultVideo");
-            vid.src           = API_URL + "/api/video/" + videoId + "/content";
-            vid.style.display = "block";
-            msg.innerText = "Video complete.";
+            src = API_URL + "/api/video/" + videoId + "/content";
           }
+          vid.src           = src;
+          vid.style.display = "block";
+          dl.href           = src;
+          dl.style.display  = "block";
+          msg.innerText = "Video complete.";
         }, 3000);
       } else if (status === "failed" || status === "error") {
         clearInterval(videoPollInterval);
@@ -386,4 +391,3 @@ function pollVideo(videoId) {
 </script>
 </body>
 </html>
-
