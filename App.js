@@ -1,3 +1,13 @@
+// App.js — Monocular Build 129
+// Changes from previous build:
+//   1. First-launch onboarding screen (Guideline 2.1(b) paywall discoverability)
+//   2. Non-subscribers can now use their 1 free render — server enforces the limit;
+//      when the server refuses, the paywall is shown
+//   3. /render and /api/video now send a stable user identity (RevenueCat app user ID
+//      in the email field) + subscriptionActive, so paying subscribers aren't caught
+//      by the IP-based free-render guard
+//   4. Fixed two malformed TouchableOpacity tags in the paywall (missing ">")
+
 import React, { useState, useRef, useEffect } from "react";
 import {
   ActivityIndicator,
@@ -16,6 +26,7 @@ import * as ImagePicker from "expo-image-picker";
 import * as MediaLibrary from "expo-media-library";
 import * as FileSystem from "expo-file-system";
 import Purchases from "react-native-purchases";
+import OnboardingScreen, { shouldShowOnboarding } from "./OnboardingScreen";
 
 const API_URL = "https://monocular-server.onrender.com";
 const RC_API_KEY = "appl_jJKgQZQIYePcVeZnnwpGtHacrrB";
@@ -45,6 +56,8 @@ export default function App() {
   const [isSubscribed, setIsSubscribed] = useState(false);
   const [showPaywall, setShowPaywall] = useState(false);
   const [purchasing, setPurchasing] = useState(false);
+  const [showOnboarding, setShowOnboarding] = useState(false);
+  const [rcUserId, setRcUserId] = useState(null);
 
   useEffect(() => {
     async function initRevenueCat() {
@@ -52,12 +65,25 @@ export default function App() {
         Purchases.configure({ apiKey: RC_API_KEY });
         const info = await Purchases.getCustomerInfo();
         setIsSubscribed(!!info.entitlements.active[ENTITLEMENT_ID]);
+        const id = await Purchases.getAppUserID();
+        setRcUserId(id || null);
       } catch (error) {
         console.log("RevenueCat init error:", error);
       }
     }
     initRevenueCat();
+    shouldShowOnboarding().then(setShowOnboarding);
   }, []);
+
+  // Stable per-install identity sent to the server so the free-render
+  // guard tracks users instead of IPs, and subscribers are never blocked.
+  function identityFields() {
+    return {
+      email: rcUserId || null,
+      subscriptionActive: isSubscribed,
+      platform: "ios",
+    };
+  }
 
   async function buySubscription() {
     try {
@@ -135,24 +161,36 @@ export default function App() {
     }
   }
 
+  // Returns true when the server's response means the free render is used up.
+  function isFreeLimitError(status, errorText) {
+    if (status === 402 || status === 403 || status === 429) return true;
+    if (!errorText) return false;
+    return /free|limit|credit|subscri/i.test(errorText);
+  }
+
   async function renderImage() {
-    if (!isSubscribed) { setShowPaywall(true); return; }
+    // Non-subscribers get one free render — the server enforces it.
     if (!prompt.trim() && !imageBase64) { setMessage("Add a brief or upload an image first."); return; }
     try {
       setLoading(true);
-      setMessage("Rendering...");
+      setMessage(isSubscribed ? "Rendering..." : "Rendering your free image...");
       setResultImage(null);
       const response = await fetch(API_URL + "/render", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ prompt, imageBase64, mode, subscriptionActive: isSubscribed }),
+        body: JSON.stringify({ prompt, imageBase64, mode, ...identityFields() }),
       });
       const data = await response.json();
       if (data.ok && data.image) {
         setResultImage(data.image);
         setMessage("Render complete.");
       } else {
-        setMessage(data.error || "Render failed.");
+        if (!isSubscribed && isFreeLimitError(response.status, data.error)) {
+          setShowPaywall(true);
+          setMessage("Your free render has been used. Subscribe for unlimited rendering.");
+        } else {
+          setMessage(data.error || "Render failed.");
+        }
       }
     } catch (error) {
       setMessage("Server connection failed.");
@@ -184,6 +222,7 @@ export default function App() {
   }
 
   async function renderVideo() {
+    // Video remains Pro-only.
     if (!isSubscribed) { setShowPaywall(true); return; }
     if (!prompt.trim() && !imageBase64) { setMessage("Add a brief or upload an image first."); return; }
     try {
@@ -195,7 +234,7 @@ export default function App() {
       const response = await fetch(API_URL + "/api/video", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ prompt, imageBase64, images, mode }),
+        body: JSON.stringify({ prompt, imageBase64, images, mode, ...identityFields() }),
       });
       const data = await response.json();
       if (!data.ok || !data.video?.id) {
@@ -276,6 +315,15 @@ export default function App() {
     }
   }
 
+  if (showOnboarding) {
+    return (
+      <OnboardingScreen
+        onTryFree={() => setShowOnboarding(false)}
+        onSeePro={() => { setShowOnboarding(false); setShowPaywall(true); }}
+      />
+    );
+  }
+
   return (
     <ScrollView style={styles.page} contentContainerStyle={styles.content}>
       <Image source={require("./assets/logo.png")} style={styles.logoMark} />
@@ -286,7 +334,7 @@ export default function App() {
           <View style={styles.paywallCard}>
             <Text style={styles.paywallTitle}>MONOCULAR PRO</Text>
             <Text style={styles.paywallPrice}>$19.99 / month — auto-renewing</Text>
-            <Text style={styles.paywallBody}>Subscribe to unlock unlimited photorealistic architectural renders and 3D walkthrough videos. Subscription required to access all features.</Text>
+            <Text style={styles.paywallBody}>Your first render is free. Subscribe to unlock unlimited photorealistic architectural renders and 3D walkthrough videos.</Text>
             <TouchableOpacity style={[styles.buttonLight, purchasing && styles.disabled]} onPress={buySubscription} disabled={purchasing}>
               {purchasing ? <ActivityIndicator color="#fff" /> : <Text style={styles.buttonLightText}>SUBSCRIBE — $19.99/MONTH</Text>}
             </TouchableOpacity>
@@ -296,12 +344,10 @@ export default function App() {
             <TouchableOpacity onPress={() => setShowPaywall(false)}>
               <Text style={styles.paywallLink}>Not now</Text>
             </TouchableOpacity>
-            <TouchableOpacity onPress={() => Linking.openURL("https://monocular-opal.vercel.app/privacy.html")}
-
+            <TouchableOpacity onPress={() => Linking.openURL("https://monocular-opal.vercel.app/privacy.html")}>
               <Text style={styles.paywallLink}>Privacy Policy</Text>
             </TouchableOpacity>
-            <TouchableOpacity onPress={() => Linking.openURL("https://monocular-opal.vercel.app/terms.html")}
-
+            <TouchableOpacity onPress={() => Linking.openURL("https://monocular-opal.vercel.app/terms.html")}>
               <Text style={styles.paywallLink}>Terms of Use</Text>
             </TouchableOpacity>
             <Text style={styles.paywallSmall}>Payment charged to Apple ID at confirmation. Subscription renews automatically unless cancelled at least 24 hours before the renewal date.</Text>
@@ -349,7 +395,7 @@ export default function App() {
         {tab === "image" ? (
           <>
             <TouchableOpacity style={[styles.buttonLight, loading && styles.disabled]} onPress={renderImage} disabled={loading}>
-              {loading ? <ActivityIndicator color="#fff" /> : <Text style={styles.buttonLightText}>RENDER</Text>}
+              {loading ? <ActivityIndicator color="#fff" /> : <Text style={styles.buttonLightText}>{isSubscribed ? "RENDER" : "RENDER — 1 FREE"}</Text>}
             </TouchableOpacity>
             {resultImage && (
               <>
@@ -371,7 +417,7 @@ export default function App() {
               </View>
             )}
             <TouchableOpacity style={[styles.buttonLight, videoLoading && styles.disabled]} onPress={renderVideo} disabled={videoLoading}>
-              {videoLoading ? <ActivityIndicator color="#fff" /> : <Text style={styles.buttonLightText}>GENERATE VIDEO</Text>}
+              {videoLoading ? <ActivityIndicator color="#fff" /> : <Text style={styles.buttonLightText}>GENERATE VIDEO — PRO</Text>}
             </TouchableOpacity>
             {videoStatus ? <Text style={styles.message}>{videoStatus}</Text> : null}
             {resultVideoUrl && (
