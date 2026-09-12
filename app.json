@@ -2,7 +2,7 @@
   "expo": {
     "name": "Monocular",
     "slug": "monocular",
-    "version": "1.0.1",
+    "version": "1.0.3",
     "icon": "./assets/icon.png",
     "userInterfaceStyle": "dark",
     "splash": {
@@ -20,7 +20,7 @@
     },
     "ios": {
       "bundleIdentifier": "com.schubertjoe.monocular",
-      "buildNumber": "129",
+      "buildNumber": "132",
       "supportsTablet": true,
       "infoPlist": {
         "ITSAppUsesNonExemptEncryption": false,
@@ -43,6 +43,12 @@
     "plugins": [
       "react-native-iap",
       "expo-video"
-    ]
+    ],
+    "runtimeVersion": {
+      "policy": "appVersion"
+    },
+    "updates": {
+      "url": "https://u.expo.dev/62149eae-43a2-4b78-85ff-2bac7d23f305"
+    }
   }
 }

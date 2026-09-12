@@ -73,8 +73,35 @@ Improve:
 Do not add extra rooms, change the layout, add text or labels.
 `;
 
+  // NEW: cutting-edge technology/style bias layer
+  // Applies to both exterior and interior modes. Vocabulary only —
+  // never overrides the preserve/geometry constraints above.
+  const cuttingEdgeLayer = `
+RENDER STYLE DIRECTION:
+When choosing materials, finishes and technology cues, favour contemporary
+and forward-looking architectural practice over generic or dated treatments.
+Where appropriate to the existing design, draw on:
+
+- advanced facade materials: low-iron glazing, anodised or perforated
+  aluminium, GFRC and fibre-cement panelling, charred timber (shou sugi ban),
+  photovoltaic glass or integrated solar shingles, ceramic rainscreen panels
+- sustainable/passive technology cues: visible solar arrays, green roofs or
+  living walls where the form supports it, rainwater capture detailing,
+  high-performance double/triple glazing with slim sightlines
+- precision detailing associated with parametric and digitally fabricated
+  construction: crisp reveals, minimal shadow gaps, consistent module lines
+- contemporary lighting technology: integrated LED strip lighting, low-profile
+  fixtures, warm-cool colour temperature mixing for dusk/night renders
+- current high-end material finishes: matte and brushed metals, large-format
+  stone or porcelain panels, exposed engineered timber structure
+
+This is a finishing and material-language bias only. It must never change
+the building's form, massing, roofline, window/door positions, room layout,
+or structural logic established in the source image.
+`;
+
   if (mode === "elevation") {
-    return `${exteriorBase}
+    return `${exteriorBase}${cuttingEdgeLayer}
 MODE: ELEVATION
 Create a clean architectural elevation.
 Orthographic front-facing view. No perspective distortion.
@@ -85,7 +112,7 @@ ${userPrompt || "Create a clean architectural elevation."}`;
   }
 
   if (mode === "site") {
-    return `${exteriorBase}
+    return `${exteriorBase}${cuttingEdgeLayer}
 MODE: SITE PLACEMENT
 Place this building into the requested location.
 Keep the building itself unchanged.
@@ -96,7 +123,7 @@ ${userPrompt || "Place this building into a realistic site context."}`;
   }
 
   if (mode === "interior") {
-    return `${interiorBase}
+    return `${interiorBase}${cuttingEdgeLayer}
 MODE: INTERIOR RENDER
 Create a realistic interior architectural render.
 Enhance the space with better materials, lighting and atmosphere.
@@ -106,7 +133,7 @@ User brief:
 ${userPrompt || "Create a realistic interior architectural render."}`;
   }
 
-  return `${exteriorBase}
+  return `${exteriorBase}${cuttingEdgeLayer}
 MODE: REALISTIC RENDER
 Create a realistic architectural render.
 Keep the building geometry close to the source.

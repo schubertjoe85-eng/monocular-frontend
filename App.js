@@ -1,19 +1,19 @@
-// App.js — Monocular Build 129
-// Changes from previous build:
-//   1. First-launch onboarding screen (Guideline 2.1(b) paywall discoverability)
-//   2. Non-subscribers can now use their 1 free render — server enforces the limit;
-//      when the server refuses, the paywall is shown
-//   3. /render and /api/video now send a stable user identity (RevenueCat app user ID
-//      in the email field) + subscriptionActive, so paying subscribers aren't caught
-//      by the IP-based free-render guard
-//   4. Fixed two malformed TouchableOpacity tags in the paywall (missing ">")
+// App.js — Monocular Build 141
+// Changes from Build 134:
+//   1. Added ViewerErrorBoundary: catches render-time errors inside the
+//      3D viewer (not just require-time errors) and shows an error screen
+//      with the real message instead of crashing the app.
+//   2. Companion to ModelViewerScreen v4 (pinch-zoom capture-phase fix,
+//      adaptive camera clip planes) and three@0.166.1 / expo-three@8.0.0.
 
 import React, { useState, useRef, useEffect } from "react";
 import {
   ActivityIndicator,
   Image,
+  KeyboardAvoidingView,
   Linking,
   Modal,
+  Platform,
   ScrollView,
   StyleSheet,
   Text,
@@ -27,15 +27,83 @@ import * as MediaLibrary from "expo-media-library";
 import * as FileSystem from "expo-file-system";
 import Purchases from "react-native-purchases";
 import OnboardingScreen, { shouldShowOnboarding } from "./OnboardingScreen";
+// NOTE: ModelViewerScreen is deliberately NOT imported here. Importing it at
+// the top level loads expo-gl/expo-three/three at app launch, and any
+// import-time error in that stack kills the app on the splash screen.
+// It is lazy-require()d inside the 3D viewer modal instead.
 
 const API_URL = "https://monocular-server.onrender.com";
 const RC_API_KEY = "appl_jJKgQZQIYePcVeZnnwpGtHacrrB";
 const ENTITLEMENT_ID = "Monocular Pro";
 
+// Render job polling
+const RENDER_POLL_INTERVAL_MS = 3000; // check status every 3s
+const RENDER_MAX_POLLS = 100;         // ~5 minutes, then give up with a clear error
+
 const MODES = [
   { key: "render", label: "EXTERIOR" },
   { key: "interior", label: "INTERIOR" },
 ];
+
+// Catches errors thrown while the 3D viewer renders (not just at require
+// time). A render-time failure shows an error screen instead of killing
+// the app.
+class ViewerErrorBoundary extends React.Component {
+  constructor(props) {
+    super(props);
+    this.state = { error: null };
+  }
+  static getDerivedStateFromError(error) {
+    return { error };
+  }
+  render() {
+    if (this.state.error) {
+      return (
+        <View style={styles.viewerErrorContainer}>
+          <Text style={styles.viewerErrorTitle}>3D VIEWER ERROR</Text>
+          <Text style={styles.viewerErrorBody}>
+            {String(this.state.error.message || this.state.error)}
+          </Text>
+          <TouchableOpacity style={styles.buttonDark} onPress={this.props.onClose}>
+            <Text style={styles.buttonDarkText}>CLOSE</Text>
+          </TouchableOpacity>
+        </View>
+      );
+    }
+    return this.props.children;
+  }
+}
+
+// Lazy-loads the 3D viewer only when the modal is open. If the 3D stack
+// fails to load, this renders an error screen (with the real error message)
+// instead of crashing the app.
+function LazyModelViewer({ onCapture, onClose }) {
+  let ModelViewerScreen = null;
+  let loadError = null;
+  try {
+    ModelViewerScreen = require("./ModelViewerScreen").default;
+  } catch (e) {
+    loadError = e;
+  }
+  if (loadError || !ModelViewerScreen) {
+    return (
+      <View style={styles.viewerErrorContainer}>
+        <Text style={styles.viewerErrorTitle}>3D VIEWER UNAVAILABLE</Text>
+        <Text style={styles.viewerErrorBody}>
+          {loadError ? String(loadError.message || loadError) : "Component failed to load."}
+        </Text>
+        <TouchableOpacity style={styles.buttonDark} onPress={onClose}>
+          <Text style={styles.buttonDarkText}>CLOSE</Text>
+        </TouchableOpacity>
+      </View>
+    );
+  }
+  return (
+    <ViewerErrorBoundary onClose={onClose}>
+      <ModelViewerScreen onCapture={onCapture} onClose={onClose} />
+    </ViewerErrorBoundary>
+  );
+}
 
 export default function App() {
   const [tab, setTab] = useState("image");
@@ -52,12 +120,15 @@ export default function App() {
   const [resultVideoUrl, setResultVideoUrl] = useState(null);
   const [savingVideo, setSavingVideo] = useState(false);
   const [message, setMessage] = useState("");
-  const pollRef = useRef(null);
+  const pollRef = useRef(null);        // video polling
+  const renderPollRef = useRef(null);  // image render polling
   const [isSubscribed, setIsSubscribed] = useState(false);
   const [showPaywall, setShowPaywall] = useState(false);
   const [purchasing, setPurchasing] = useState(false);
   const [showOnboarding, setShowOnboarding] = useState(false);
   const [rcUserId, setRcUserId] = useState(null);
+  const [fullscreenImage, setFullscreenImage] = useState(null);
+  const [showModelViewer, setShowModelViewer] = useState(false);
 
   useEffect(() => {
     async function initRevenueCat() {
@@ -73,6 +144,12 @@ export default function App() {
     }
     initRevenueCat();
     shouldShowOnboarding().then(setShowOnboarding);
+
+    // Clean up any running polls if the app unmounts.
+    return () => {
+      if (pollRef.current) clearInterval(pollRef.current);
+      if (renderPollRef.current) clearInterval(renderPollRef.current);
+    };
   }, []);
 
   // Stable per-install identity sent to the server so the free-render
@@ -143,6 +220,23 @@ export default function App() {
     }
   }
 
+  // Captured 3D model view -> same pipeline as a picked photo.
+  async function handleModelCapture(uri) {
+    try {
+      const base64 = await FileSystem.readAsStringAsync(uri, {
+        encoding: FileSystem.EncodingType.Base64,
+      });
+      setSelectedImage(uri);
+      setImageBase64(base64);
+      setResultImage(null);
+      setResultVideoUrl(null);
+      setShowModelViewer(false);
+      setMessage("Model view captured. Add a brief and render.");
+    } catch (error) {
+      setMessage("Could not use the captured view.");
+    }
+  }
+
   async function pickExtraImage() {
     if (extraImages.length >= 2) { setMessage("Up to 3 images total."); return; }
     try {
@@ -168,35 +262,81 @@ export default function App() {
     return /free|limit|credit|subscri/i.test(errorText);
   }
 
+  function stopRenderPolling() {
+    if (renderPollRef.current) {
+      clearInterval(renderPollRef.current);
+      renderPollRef.current = null;
+    }
+  }
+
+  // ---- RENDER: job pattern (start + poll) ----
+  // POST /render/start returns { ok, jobId } immediately (402 = free render used).
+  // GET /render/status/:jobId returns:
+  //   { ok: true,  status: "pending" }
+  //   { ok: true,  status: "done", image }
+  //   { ok: false, status: "failed" | "not_found", error }
   async function renderImage() {
     // Non-subscribers get one free render — the server enforces it.
     if (!prompt.trim() && !imageBase64) { setMessage("Add a brief or upload an image first."); return; }
+    stopRenderPolling();
     try {
       setLoading(true);
-      setMessage(isSubscribed ? "Rendering..." : "Rendering your free image...");
+      setMessage(isSubscribed ? "Starting render..." : "Starting your free render...");
       setResultImage(null);
-      const response = await fetch(API_URL + "/render", {
+      const response = await fetch(API_URL + "/render/start", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ prompt, imageBase64, mode, ...identityFields() }),
       });
       const data = await response.json();
-      if (data.ok && data.image) {
-        setResultImage(data.image);
-        setMessage("Render complete.");
-      } else {
+      if (!data.ok || !data.jobId) {
         if (!isSubscribed && isFreeLimitError(response.status, data.error)) {
           setShowPaywall(true);
           setMessage("Your free render has been used. Subscribe for unlimited rendering.");
         } else {
-          setMessage(data.error || "Render failed.");
+          setMessage(data.error || "Render failed to start.");
         }
+        setLoading(false);
+        return;
       }
+      setMessage("Rendering... high-fidelity renders can take a minute or two.");
+      pollRender(data.jobId);
     } catch (error) {
       setMessage("Server connection failed.");
-    } finally {
       setLoading(false);
     }
+  }
+
+  function pollRender(jobId) {
+    let polls = 0;
+    renderPollRef.current = setInterval(async () => {
+      polls += 1;
+      if (polls > RENDER_MAX_POLLS) {
+        stopRenderPolling();
+        setLoading(false);
+        setMessage("Render timed out. Please try again.");
+        return;
+      }
+      try {
+        const response = await fetch(API_URL + "/render/status/" + jobId);
+        const data = await response.json();
+        if (data.status === "done" && data.image) {
+          stopRenderPolling();
+          setResultImage(data.image);
+          setLoading(false);
+          setMessage("Render complete. Tap the image to view full screen.");
+        } else if (data.status === "failed" || data.status === "not_found" || data.ok === false) {
+          // "not_found" means the server restarted mid-render — the user can
+          // simply retry (the free-render map reset too, so nothing is lost).
+          stopRenderPolling();
+          setLoading(false);
+          setMessage(data.error || "Render failed. Please try again.");
+        }
+        // status === "pending": keep polling silently.
+      } catch (error) {
+        // Transient network blip — keep polling until MAX_POLLS.
+      }
+    }, RENDER_POLL_INTERVAL_MS);
   }
 
   async function saveImage() {
@@ -325,128 +465,186 @@ export default function App() {
   }
 
   return (
-    <ScrollView style={styles.page} contentContainerStyle={styles.content}>
-      <Image source={require("./assets/logo.png")} style={styles.logoMark} />
-      <Text style={styles.subtitle}>Rational Architectural Visualisation</Text>
+    <KeyboardAvoidingView
+      style={styles.page}
+      behavior={Platform.OS === "ios" ? "padding" : "height"}
+    >
+      <ScrollView
+        style={styles.page}
+        contentContainerStyle={styles.content}
+        keyboardShouldPersistTaps="handled"
+        keyboardDismissMode="interactive"
+      >
+        <Image source={require("./assets/logo.png")} style={styles.logoMark} />
+        <Text style={styles.subtitle}>Rational Architectural Visualisation</Text>
 
-      <Modal visible={showPaywall} transparent animationType="slide">
-        <View style={styles.paywallOverlay}>
-          <View style={styles.paywallCard}>
-            <Text style={styles.paywallTitle}>MONOCULAR PRO</Text>
-            <Text style={styles.paywallPrice}>$19.99 / month — auto-renewing</Text>
-            <Text style={styles.paywallBody}>Your first render is free. Subscribe to unlock unlimited photorealistic architectural renders and 3D walkthrough videos.</Text>
-            <TouchableOpacity style={[styles.buttonLight, purchasing && styles.disabled]} onPress={buySubscription} disabled={purchasing}>
-              {purchasing ? <ActivityIndicator color="#fff" /> : <Text style={styles.buttonLightText}>SUBSCRIBE — $19.99/MONTH</Text>}
-            </TouchableOpacity>
-            <TouchableOpacity onPress={restorePurchases} disabled={purchasing}>
-              <Text style={styles.paywallLink}>Restore purchases</Text>
-            </TouchableOpacity>
-            <TouchableOpacity onPress={() => setShowPaywall(false)}>
-              <Text style={styles.paywallLink}>Not now</Text>
-            </TouchableOpacity>
-            <TouchableOpacity onPress={() => Linking.openURL("https://monocular-opal.vercel.app/privacy.html")}>
-              <Text style={styles.paywallLink}>Privacy Policy</Text>
-            </TouchableOpacity>
-            <TouchableOpacity onPress={() => Linking.openURL("https://monocular-opal.vercel.app/terms.html")}>
-              <Text style={styles.paywallLink}>Terms of Use</Text>
-            </TouchableOpacity>
-            <Text style={styles.paywallSmall}>Payment charged to Apple ID at confirmation. Subscription renews automatically unless cancelled at least 24 hours before the renewal date.</Text>
+        <Modal visible={showPaywall} transparent animationType="slide">
+          <View style={styles.paywallOverlay}>
+            <View style={styles.paywallCard}>
+              <Text style={styles.paywallTitle}>MONOCULAR PRO</Text>
+              <Text style={styles.paywallPrice}>$19.99 / month — auto-renewing</Text>
+              <Text style={styles.paywallBody}>Your first render is free. Subscribe to unlock unlimited photorealistic architectural renders and 3D walkthrough videos.</Text>
+              <TouchableOpacity style={[styles.buttonLight, purchasing && styles.disabled]} onPress={buySubscription} disabled={purchasing}>
+                {purchasing ? <ActivityIndicator color="#fff" /> : <Text style={styles.buttonLightText}>SUBSCRIBE — $19.99/MONTH</Text>}
+              </TouchableOpacity>
+              <TouchableOpacity onPress={restorePurchases} disabled={purchasing}>
+                <Text style={styles.paywallLink}>Restore purchases</Text>
+              </TouchableOpacity>
+              <TouchableOpacity onPress={() => setShowPaywall(false)}>
+                <Text style={styles.paywallLink}>Not now</Text>
+              </TouchableOpacity>
+              <TouchableOpacity onPress={() => Linking.openURL("https://monocular-opal.vercel.app/privacy.html")}>
+                <Text style={styles.paywallLink}>Privacy Policy</Text>
+              </TouchableOpacity>
+              <TouchableOpacity onPress={() => Linking.openURL("https://monocular-opal.vercel.app/terms.html")}>
+                <Text style={styles.paywallLink}>Terms of Use</Text>
+              </TouchableOpacity>
+              <Text style={styles.paywallSmall}>Payment charged to Apple ID at confirmation. Subscription renews automatically unless cancelled at least 24 hours before the renewal date.</Text>
+            </View>
           </View>
-        </View>
-      </Modal>
+        </Modal>
 
-      <View style={styles.tabRow}>
-        <TouchableOpacity style={[styles.tabButton, tab === "image" && styles.tabButtonActive]} onPress={() => setTab("image")}>
-          <Text style={[styles.tabText, tab === "image" && styles.tabTextActive]}>IMAGE</Text>
-        </TouchableOpacity>
-        <TouchableOpacity style={[styles.tabButton, tab === "video" && styles.tabButtonActive]} onPress={() => setTab("video")}>
-          <Text style={[styles.tabText, tab === "video" && styles.tabTextActive]}>3D VIDEO</Text>
-        </TouchableOpacity>
-      </View>
-
-      <View style={styles.card}>
-        <TouchableOpacity style={styles.buttonDark} onPress={pickImage}>
-          <Text style={styles.buttonDarkText}>{selectedImage ? "CHANGE IMAGE" : "IMPORT IMAGE"}</Text>
-        </TouchableOpacity>
-
-        {selectedImage && <Image source={{ uri: selectedImage }} style={styles.preview} />}
-
-        <View style={styles.modeRow}>
-          {MODES.map(m => (
-            <TouchableOpacity
-              key={m.key}
-              style={[styles.modeButton, mode === m.key && styles.modeButtonActive]}
-              onPress={() => setMode(m.key)}
+        {/* Fullscreen viewer: tap a render to inspect, pinch to zoom */}
+        <Modal visible={!!fullscreenImage} transparent={false} animationType="fade">
+          <View style={styles.fullscreenContainer}>
+            <ScrollView
+              style={styles.fullscreenScroll}
+              contentContainerStyle={styles.fullscreenScrollContent}
+              maximumZoomScale={5}
+              minimumZoomScale={1}
+              bouncesZoom
+              centerContent
+              showsVerticalScrollIndicator={false}
+              showsHorizontalScrollIndicator={false}
             >
-              <Text style={[styles.modeText, mode === m.key && styles.modeTextActive]}>{m.label}</Text>
+              {fullscreenImage && (
+                <Image
+                  source={{ uri: fullscreenImage }}
+                  style={styles.fullscreenImage}
+                  resizeMode="contain"
+                />
+              )}
+            </ScrollView>
+            <TouchableOpacity style={styles.fullscreenClose} onPress={() => setFullscreenImage(null)}>
+              <Text style={styles.fullscreenCloseText}>CLOSE</Text>
             </TouchableOpacity>
-          ))}
+          </View>
+        </Modal>
+
+        {/* 3D model viewer: lazy-loaded so the GL stack only loads on demand */}
+        <Modal visible={showModelViewer} transparent={false} animationType="slide">
+          {showModelViewer && (
+            <LazyModelViewer
+              onCapture={handleModelCapture}
+              onClose={() => setShowModelViewer(false)}
+            />
+          )}
+        </Modal>
+
+        <View style={styles.tabRow}>
+          <TouchableOpacity style={[styles.tabButton, tab === "image" && styles.tabButtonActive]} onPress={() => setTab("image")}>
+            <Text style={[styles.tabText, tab === "image" && styles.tabTextActive]}>IMAGE</Text>
+          </TouchableOpacity>
+          <TouchableOpacity style={[styles.tabButton, tab === "video" && styles.tabButtonActive]} onPress={() => setTab("video")}>
+            <Text style={[styles.tabText, tab === "video" && styles.tabTextActive]}>3D VIDEO</Text>
+          </TouchableOpacity>
         </View>
 
-        <TextInput
-          style={styles.input}
-          placeholder="Describe the render direction..."
-          placeholderTextColor="#777"
-          multiline
-          value={prompt}
-          onChangeText={setPrompt}
-        />
+        <View style={styles.card}>
+          <TouchableOpacity style={styles.buttonDark} onPress={pickImage}>
+            <Text style={styles.buttonDarkText}>{selectedImage ? "CHANGE IMAGE" : "IMPORT IMAGE"}</Text>
+          </TouchableOpacity>
 
-        {tab === "image" ? (
-          <>
-            <TouchableOpacity style={[styles.buttonLight, loading && styles.disabled]} onPress={renderImage} disabled={loading}>
-              {loading ? <ActivityIndicator color="#fff" /> : <Text style={styles.buttonLightText}>{isSubscribed ? "RENDER" : "RENDER — 1 FREE"}</Text>}
-            </TouchableOpacity>
-            {resultImage && (
-              <>
-                <Image source={{ uri: resultImage }} style={styles.result} />
-                <TouchableOpacity style={[styles.buttonDark, saving && styles.disabled]} onPress={saveImage} disabled={saving}>
-                  <Text style={styles.buttonDarkText}>{saving ? "SAVING..." : "SAVE IMAGE"}</Text>
-                </TouchableOpacity>
-              </>
-            )}
-          </>
-        ) : (
-          <>
-            <TouchableOpacity style={styles.buttonDark} onPress={pickExtraImage}>
-              <Text style={styles.buttonDarkText}>ADD ANGLE (UP TO 3)</Text>
-            </TouchableOpacity>
-            {extraImages.length > 0 && (
-              <View style={styles.thumbRow}>
-                {extraImages.map((img, i) => <Image key={i} source={{ uri: img.uri }} style={styles.thumb} />)}
-              </View>
-            )}
-            <TouchableOpacity style={[styles.buttonLight, videoLoading && styles.disabled]} onPress={renderVideo} disabled={videoLoading}>
-              {videoLoading ? <ActivityIndicator color="#fff" /> : <Text style={styles.buttonLightText}>GENERATE VIDEO — PRO</Text>}
-            </TouchableOpacity>
-            {videoStatus ? <Text style={styles.message}>{videoStatus}</Text> : null}
-            {resultVideoUrl && (
-              <>
-                <Video
-                  source={{ uri: resultVideoUrl }}
-                  style={styles.result}
-                  useNativeControls
-                  resizeMode={ResizeMode.CONTAIN}
-                  shouldPlay
-                  isLooping
-                />
-                <TouchableOpacity style={[styles.buttonDark, savingVideo && styles.disabled]} onPress={saveVideo} disabled={savingVideo}>
-                  <Text style={styles.buttonDarkText}>{savingVideo ? "SAVING..." : "SAVE VIDEO"}</Text>
-                </TouchableOpacity>
-              </>
-            )}
-          </>
-        )}
+          <TouchableOpacity style={styles.buttonDark} onPress={() => setShowModelViewer(true)}>
+            <Text style={styles.buttonDarkText}>IMPORT 3D MODEL</Text>
+          </TouchableOpacity>
 
-        {message ? <Text style={styles.message}>{message}</Text> : null}
-      </View>
-    </ScrollView>
+          {selectedImage && (
+            <TouchableOpacity activeOpacity={0.9} onPress={() => setFullscreenImage(selectedImage)}>
+              <Image source={{ uri: selectedImage }} style={styles.preview} />
+            </TouchableOpacity>
+          )}
+
+          <View style={styles.modeRow}>
+            {MODES.map(m => (
+              <TouchableOpacity
+                key={m.key}
+                style={[styles.modeButton, mode === m.key && styles.modeButtonActive]}
+                onPress={() => setMode(m.key)}
+              >
+                <Text style={[styles.modeText, mode === m.key && styles.modeTextActive]}>{m.label}</Text>
+              </TouchableOpacity>
+            ))}
+          </View>
+
+          <TextInput
+            style={styles.input}
+            placeholder="Describe the render direction..."
+            placeholderTextColor="#777"
+            multiline
+            scrollEnabled={false}
+            value={prompt}
+            onChangeText={setPrompt}
+          />
+
+          {tab === "image" ? (
+            <>
+              <TouchableOpacity style={[styles.buttonLight, loading && styles.disabled]} onPress={renderImage} disabled={loading}>
+                {loading ? <ActivityIndicator color="#fff" /> : <Text style={styles.buttonLightText}>{isSubscribed ? "RENDER" : "RENDER — 1 FREE"}</Text>}
+              </TouchableOpacity>
+              {resultImage && (
+                <>
+                  <TouchableOpacity activeOpacity={0.9} onPress={() => setFullscreenImage(resultImage)}>
+                    <Image source={{ uri: resultImage }} style={styles.result} />
+                  </TouchableOpacity>
+                  <TouchableOpacity style={[styles.buttonDark, saving && styles.disabled]} onPress={saveImage} disabled={saving}>
+                    <Text style={styles.buttonDarkText}>{saving ? "SAVING..." : "SAVE IMAGE"}</Text>
+                  </TouchableOpacity>
+                </>
+              )}
+            </>
+          ) : (
+            <>
+              <TouchableOpacity style={styles.buttonDark} onPress={pickExtraImage}>
+                <Text style={styles.buttonDarkText}>ADD ANGLE (UP TO 3)</Text>
+              </TouchableOpacity>
+              {extraImages.length > 0 && (
+                <View style={styles.thumbRow}>
+                  {extraImages.map((img, i) => <Image key={i} source={{ uri: img.uri }} style={styles.thumb} />)}
+                </View>
+              )}
+              <TouchableOpacity style={[styles.buttonLight, videoLoading && styles.disabled]} onPress={renderVideo} disabled={videoLoading}>
+                {videoLoading ? <ActivityIndicator color="#fff" /> : <Text style={styles.buttonLightText}>GENERATE VIDEO — PRO</Text>}
+              </TouchableOpacity>
+              {videoStatus ? <Text style={styles.message}>{videoStatus}</Text> : null}
+              {resultVideoUrl && (
+                <>
+                  <Video
+                    source={{ uri: resultVideoUrl }}
+                    style={styles.result}
+                    useNativeControls
+                    resizeMode={ResizeMode.CONTAIN}
+                    shouldPlay
+                    isLooping
+                  />
+                  <TouchableOpacity style={[styles.buttonDark, savingVideo && styles.disabled]} onPress={saveVideo} disabled={savingVideo}>
+                    <Text style={styles.buttonDarkText}>{savingVideo ? "SAVING..." : "SAVE VIDEO"}</Text>
+                  </TouchableOpacity>
+                </>
+              )}
+            </>
+          )}
+
+          {message ? <Text style={styles.message}>{message}</Text> : null}
+        </View>
+      </ScrollView>
+    </KeyboardAvoidingView>
   );
 }
 
 const styles = StyleSheet.create({
   page: { flex: 1, backgroundColor: "#050505" },
-  content: { padding: 22, paddingTop: 70, alignItems: "center" },
+  content: { padding: 22, paddingTop: 70, paddingBottom: 120, alignItems: "center" },
   logoMark: { width: 120, height: 120, borderRadius: 24, alignSelf: "center", marginBottom: 10, resizeMode: "contain" },
   subtitle: { color: "#aaa", fontSize: 14, marginBottom: 20, textAlign: "center" },
   tabRow: { flexDirection: "row", backgroundColor: "#111", borderRadius: 14, padding: 4, marginBottom: 18, borderWidth: 1, borderColor: "#2a2a2a" },
@@ -464,9 +662,9 @@ const styles = StyleSheet.create({
   buttonDarkText: { color: "#fff", fontWeight: "900", letterSpacing: 1 },
   buttonLight: { backgroundColor: "#2E4D3A", padding: 16, borderRadius: 16, alignItems: "center", marginTop: 16 },
   buttonLightText: { color: "#fff", fontWeight: "900", letterSpacing: 1 },
-  input: { minHeight: 110, backgroundColor: "#050505", color: "#fff", borderRadius: 16, padding: 14, borderWidth: 1, borderColor: "#333", textAlignVertical: "top" },
+  input: { minHeight: 110, backgroundColor: "#050505", color: "#fff", borderRadius: 16, padding: 14, borderWidth: 1, borderColor: "#333", textAlignVertical: "top", fontSize: 15, lineHeight: 21 },
   preview: { width: "100%", height: 260, borderRadius: 18, resizeMode: "cover", marginBottom: 16 },
-  result: { width: "100%", height: 360, borderRadius: 18, marginTop: 18, marginBottom: 16 },
+  result: { width: "100%", height: 480, borderRadius: 18, marginTop: 18, marginBottom: 16, resizeMode: "cover" },
   thumbRow: { flexDirection: "row", flexWrap: "wrap", marginBottom: 16 },
   thumb: { width: 80, height: 80, borderRadius: 10, marginRight: 8, marginBottom: 8 },
   message: { color: "#ddd", textAlign: "center", marginTop: 14 },
@@ -478,4 +676,13 @@ const styles = StyleSheet.create({
   paywallBody: { color: "#aaa", fontSize: 14, textAlign: "center", marginBottom: 22, lineHeight: 20 },
   paywallLink: { color: "#888", fontSize: 13, marginTop: 16, textAlign: "center" },
   paywallSmall: { color: "#555", fontSize: 11, textAlign: "center", marginTop: 16, lineHeight: 16 },
+  fullscreenContainer: { flex: 1, backgroundColor: "#000" },
+  fullscreenScroll: { flex: 1 },
+  fullscreenScrollContent: { flexGrow: 1, justifyContent: "center" },
+  fullscreenImage: { width: "100%", height: "100%", minHeight: 400 },
+  fullscreenClose: { position: "absolute", top: 60, right: 24, backgroundColor: "rgba(17,17,17,0.9)", paddingVertical: 10, paddingHorizontal: 18, borderRadius: 12, borderWidth: 1, borderColor: "#2a2a2a" },
+  fullscreenCloseText: { color: "#fff", fontWeight: "900", letterSpacing: 1, fontSize: 12 },
+  viewerErrorContainer: { flex: 1, backgroundColor: "#050505", justifyContent: "center", alignItems: "center", padding: 24 },
+  viewerErrorTitle: { color: "#fff", fontSize: 18, fontWeight: "900", letterSpacing: 2, marginBottom: 12 },
+  viewerErrorBody: { color: "#aaa", fontSize: 13, textAlign: "center", marginBottom: 24, lineHeight: 19 },
 });

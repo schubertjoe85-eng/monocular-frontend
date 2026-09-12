@@ -16,11 +16,15 @@
     "expo": "~52.0.0",
     "expo-av": "~15.0.2",
     "expo-dev-client": "~5.0.20",
+    "expo-document-picker": "~13.0.3",
     "expo-file-system": "~18.0.12",
+    "expo-gl": "~15.0.5",
     "expo-image-picker": "~16.0.6",
     "expo-linking": "~7.0.5",
     "expo-media-library": "~17.0.6",
     "expo-status-bar": "~2.0.1",
+    "expo-three": "^8.0.0",
+    "expo-updates": "~0.27.5",
     "expo-video": "~2.0.6",
     "react": "18.3.1",
     "react-dom": "18.3.1",
@@ -28,7 +32,8 @@
     "react-native-iap": "12.15.6",
     "react-native-purchases": "^10.4.0",
     "react-native-web": "~0.19.13",
-    "react-native-webview": "13.12.5"
+    "react-native-webview": "13.12.5",
+    "three": "^0.166.1"
   },
   "devDependencies": {
     "@types/react": "~18.3.12",
