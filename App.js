@@ -129,6 +129,10 @@ export default function App() {
   const [rcUserId, setRcUserId] = useState(null);
   const [fullscreenImage, setFullscreenImage] = useState(null);
   const [showModelViewer, setShowModelViewer] = useState(false);
+  // Real, localized price from the store - never hardcode a price string,
+  // since it drifts the moment App Store Connect pricing changes (as it just
+  // did: $19.99 -> $5.99) and differs by the subscriber's own storefront/currency.
+  const [priceString, setPriceString] = useState(null);
 
   useEffect(() => {
     async function initRevenueCat() {
@@ -138,6 +142,10 @@ export default function App() {
         setIsSubscribed(!!info.entitlements.active[ENTITLEMENT_ID]);
         const id = await Purchases.getAppUserID();
         setRcUserId(id || null);
+        const offerings = await Purchases.getOfferings();
+        const pkg = offerings.current && offerings.current.availablePackages.length > 0
+          ? offerings.current.availablePackages[0] : null;
+        if (pkg) setPriceString(pkg.product.priceString);
       } catch (error) {
         console.log("RevenueCat init error:", error);
       }
@@ -160,6 +168,12 @@ export default function App() {
       subscriptionActive: isSubscribed,
       platform: "ios",
     };
+  }
+
+  // /api/video/multi verifies the subscriber via this RevenueCat id header
+  // (matching the desktop app), rather than trusting a client-sent flag.
+  function rcHeaders() {
+    return rcUserId ? { "x-rc-user-id": rcUserId } : {};
   }
 
   async function buySubscription() {
@@ -371,23 +385,74 @@ export default function App() {
       setVideoStatus("Submitting video job...");
       setMessage("");
       const images = [imageBase64, ...extraImages.map(x => x.base64)].filter(Boolean);
-      const response = await fetch(API_URL + "/api/video", {
+      // 2+ captured angles stitch into one video (desktop's multi-angle
+      // flow); a single image keeps using the legacy endpoint.
+      const multi = images.length > 1;
+      const response = await fetch(API_URL + (multi ? "/api/video/multi" : "/api/video"), {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ prompt, imageBase64, images, mode, ...identityFields() }),
+        headers: { "Content-Type": "application/json", ...rcHeaders() },
+        body: JSON.stringify(
+          multi
+            ? { prompt, images, mode, ratio: "960:960" }
+            : { prompt, imageBase64, images, mode, ...identityFields() }
+        ),
       });
       const data = await response.json();
-      if (!data.ok || !data.video?.id) {
-        setVideoStatus("");
-        setMessage(data.error || "Video request failed.");
-        setVideoLoading(false);
-        return;
+      if (multi) {
+        if (!data.ok || !data.jobId) {
+          setVideoStatus("");
+          setMessage(data.error || "Video request failed.");
+          setVideoLoading(false);
+          return;
+        }
+        pollMultiVideo(data.jobId);
+      } else {
+        if (!data.ok || !data.video?.id) {
+          setVideoStatus("");
+          setMessage(data.error || "Video request failed.");
+          setVideoLoading(false);
+          return;
+        }
+        pollVideo(data.video.id);
       }
-      pollVideo(data.video.id);
     } catch (error) {
       setMessage("Server connection failed.");
       setVideoLoading(false);
     }
+  }
+
+  // /api/video/multi/file/:jobId is single-use (the server deletes its
+  // buffer on first fetch), so download it to a local file exactly once here
+  // rather than pointing <Video>/saveVideo at the remote URL directly - a
+  // second fetch (playback then save) would otherwise 404.
+  function pollMultiVideo(jobId) {
+    if (pollRef.current) clearInterval(pollRef.current);
+    pollRef.current = setInterval(async () => {
+      try {
+        const response = await fetch(API_URL + "/api/video/multi/status/" + jobId);
+        const data = await response.json();
+        setVideoStatus("Status: " + (data.status || "processing") + "...");
+        if (data.status === "done" && data.url) {
+          clearInterval(pollRef.current);
+          setVideoStatus("");
+          setMessage("Finalising video...");
+          try {
+            const fileUri = FileSystem.cacheDirectory + "monocular-multi-" + jobId + ".mp4";
+            const download = await FileSystem.downloadAsync(API_URL + data.url, fileUri);
+            setResultVideoUrl(download.uri);
+            setMessage("Video render complete.");
+          } catch (e) {
+            setMessage("Video finished, but could not be retrieved.");
+          }
+          setVideoLoading(false);
+        } else if (data.status === "failed" || data.ok === false) {
+          clearInterval(pollRef.current);
+          setVideoLoading(false);
+          setVideoStatus("");
+          setMessage(data.error || "Video generation failed.");
+        }
+      } catch (error) {}
+    }, 4000);
   }
 
   function pollVideo(videoId) {
@@ -443,9 +508,15 @@ export default function App() {
       setMessage("Saving video...");
       const permission = await MediaLibrary.requestPermissionsAsync();
       if (!permission.granted) { setMessage("Photos permission required."); return; }
-      const fileUri = FileSystem.cacheDirectory + "monocular-video-" + Date.now() + ".mp4";
-      const download = await FileSystem.downloadAsync(resultVideoUrl, fileUri);
-      const asset = await MediaLibrary.createAssetAsync(download.uri);
+      // Multi-angle videos are already a local file (see pollMultiVideo) -
+      // re-downloading a single-use remote URL a second time would 404.
+      const localUri = resultVideoUrl.startsWith("file://")
+        ? resultVideoUrl
+        : (await FileSystem.downloadAsync(
+            resultVideoUrl,
+            FileSystem.cacheDirectory + "monocular-video-" + Date.now() + ".mp4"
+          )).uri;
+      const asset = await MediaLibrary.createAssetAsync(localUri);
       await MediaLibrary.createAlbumAsync("Monocular", asset, false);
       setMessage("Video saved to Photos.");
     } catch (error) {
@@ -482,10 +553,10 @@ export default function App() {
           <View style={styles.paywallOverlay}>
             <View style={styles.paywallCard}>
               <Text style={styles.paywallTitle}>MONOCULAR PRO</Text>
-              <Text style={styles.paywallPrice}>$19.99 / month — auto-renewing</Text>
+              <Text style={styles.paywallPrice}>{priceString ? `${priceString} / month — auto-renewing` : "Loading price…"}</Text>
               <Text style={styles.paywallBody}>Your first render is free. Subscribe to unlock unlimited photorealistic architectural renders and 3D walkthrough videos.</Text>
               <TouchableOpacity style={[styles.buttonLight, purchasing && styles.disabled]} onPress={buySubscription} disabled={purchasing}>
-                {purchasing ? <ActivityIndicator color="#fff" /> : <Text style={styles.buttonLightText}>SUBSCRIBE — $19.99/MONTH</Text>}
+                {purchasing ? <ActivityIndicator color="#fff" /> : <Text style={styles.buttonLightText}>{priceString ? `SUBSCRIBE — ${priceString}/MONTH` : "SUBSCRIBE"}</Text>}
               </TouchableOpacity>
               <TouchableOpacity onPress={restorePurchases} disabled={purchasing}>
                 <Text style={styles.paywallLink}>Restore purchases</Text>
