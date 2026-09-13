@@ -50,7 +50,11 @@ for (let i = 0; i < B64_CHARS.length; i++) {
 }
 
 function base64ToArrayBuffer(base64) {
-  const clean = base64.replace(/[^A-Za-z0-9+/]/g, "");
+  // Must keep '=' padding here: stripping it before computing byteLength
+  // (as this used to do) shortens `len` by the padding count while the
+  // formula still divides by 4 assuming a full group, silently truncating
+  // the decoded buffer by a byte and corrupting every GLB's final bytes.
+  const clean = base64.replace(/[^A-Za-z0-9+/=]/g, "");
   const len = clean.length;
   const padding =
     base64.endsWith("==") ? 2 : base64.endsWith("=") ? 1 : 0;
