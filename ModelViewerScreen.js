@@ -72,7 +72,7 @@ function base64ToArrayBuffer(base64) {
 // ---------------------------------------------------------------------------
 // Component
 // ---------------------------------------------------------------------------
-export default function ModelViewerScreen({ onCapture, onClose }) {
+export default function ModelViewerScreen({ onCapture, onClose, capturedCount = 0 }) {
   const [modelName, setModelName] = useState(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState(null);
@@ -455,7 +455,7 @@ export default function ModelViewerScreen({ onCapture, onClose }) {
     <View style={styles.container}>
       <View style={styles.topBar}>
         <TouchableOpacity onPress={onClose} style={styles.closeButton}>
-          <Text style={styles.closeButtonText}>CLOSE</Text>
+          <Text style={styles.closeButtonText}>{capturedCount > 0 ? "DONE" : "CLOSE"}</Text>
         </TouchableOpacity>
         <Text style={styles.topBarTitle} numberOfLines={1}>
           {modelName || "3D MODEL"}
@@ -539,13 +539,17 @@ export default function ModelViewerScreen({ onCapture, onClose }) {
         <TouchableOpacity
           style={[
             styles.captureButton,
-            (!modelName || !glReady || capturing) && styles.disabled,
+            (!modelName || !glReady || capturing || capturedCount >= 3) && styles.disabled,
           ]}
           onPress={captureView}
-          disabled={!modelName || !glReady || capturing}
+          disabled={!modelName || !glReady || capturing || capturedCount >= 3}
         >
           <Text style={styles.captureButtonText}>
-            {capturing ? "CAPTURING..." : "CAPTURE VIEW"}
+            {capturing
+              ? "CAPTURING..."
+              : capturedCount >= 3
+              ? "3 VIEWS CAPTURED"
+              : `CAPTURE VIEW ${capturedCount + 1}/3`}
           </Text>
         </TouchableOpacity>
       </View>

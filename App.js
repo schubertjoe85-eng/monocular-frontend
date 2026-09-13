@@ -77,7 +77,7 @@ class ViewerErrorBoundary extends React.Component {
 // Lazy-loads the 3D viewer only when the modal is open. If the 3D stack
 // fails to load, this renders an error screen (with the real error message)
 // instead of crashing the app.
-function LazyModelViewer({ onCapture, onClose }) {
+function LazyModelViewer({ onCapture, onClose, capturedCount }) {
   let ModelViewerScreen = null;
   let loadError = null;
   try {
@@ -100,7 +100,7 @@ function LazyModelViewer({ onCapture, onClose }) {
   }
   return (
     <ViewerErrorBoundary onClose={onClose}>
-      <ModelViewerScreen onCapture={onCapture} onClose={onClose} />
+      <ModelViewerScreen onCapture={onCapture} onClose={onClose} capturedCount={capturedCount} />
     </ViewerErrorBoundary>
   );
 }
@@ -235,17 +235,32 @@ export default function App() {
   }
 
   // Captured 3D model view -> same pipeline as a picked photo.
+  // Called once per capture from the 3D viewer. Keeps the viewer open for
+  // up to 3 angles (matching desktop's orbit -> capture -> orbit -> capture
+  // flow) instead of closing after the first - previously this closed the
+  // viewer immediately, so there was no way to capture a 2nd/3rd angle of
+  // the same model for multi-angle video.
   async function handleModelCapture(uri) {
     try {
       const base64 = await FileSystem.readAsStringAsync(uri, {
         encoding: FileSystem.EncodingType.Base64,
       });
-      setSelectedImage(uri);
-      setImageBase64(base64);
-      setResultImage(null);
-      setResultVideoUrl(null);
-      setShowModelViewer(false);
-      setMessage("Model view captured. Add a brief and render.");
+      if (!imageBase64) {
+        setSelectedImage(uri);
+        setImageBase64(base64);
+        setResultImage(null);
+        setResultVideoUrl(null);
+        setMessage("View 1 captured. Orbit and capture more angles, or tap Done.");
+      } else if (extraImages.length < 2) {
+        setExtraImages([...extraImages, { uri, base64 }]);
+        const count = extraImages.length + 2;
+        setMessage(
+          count >= 3
+            ? "3 views captured."
+            : `View ${count} captured. Orbit and capture another, or tap Done.`
+        );
+        if (count >= 3) setShowModelViewer(false);
+      }
     } catch (error) {
       setMessage("Could not use the captured view.");
     }
@@ -608,6 +623,7 @@ export default function App() {
             <LazyModelViewer
               onCapture={handleModelCapture}
               onClose={() => setShowModelViewer(false)}
+              capturedCount={imageBase64 ? 1 + extraImages.length : 0}
             />
           )}
         </Modal>
