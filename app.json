@@ -25,7 +25,9 @@
       "infoPlist": {
         "ITSAppUsesNonExemptEncryption": false,
         "NSPhotoLibraryUsageDescription": "Monocular uses your photo library so you can select drawings, plans, or project images to create architectural-style renders.",
-        "NSPhotoLibraryAddUsageDescription": "Monocular saves finished renders to your photo library so you can access and share them later."
+        "NSPhotoLibraryAddUsageDescription": "Monocular saves finished renders to your photo library so you can access and share them later.",
+        "LSSupportsOpeningDocumentsInPlace": true,
+        "UIFileSharingEnabled": true
       }
     },
     "android": {

@@ -37,6 +37,11 @@ import { GLTFLoader } from "three/examples/jsm/loaders/GLTFLoader.js";
 import { OBJLoader } from "three/examples/jsm/loaders/OBJLoader.js";
 import { ColladaLoader } from "three/examples/jsm/loaders/ColladaLoader.js";
 
+// three.js mutates a single global THREE instance rather than being purely
+// ESM - under Metro this can end up duplicated/undefined across bundles.
+// Pin it explicitly so expo-three's Renderer always sees the same instance.
+global.THREE = global.THREE || THREE;
+
 // ---------------------------------------------------------------------------
 // base64 -> ArrayBuffer (GLB files arrive as base64 from expo-file-system)
 // Lookup-table decoder: O(1) per character instead of indexOf's O(64).
@@ -233,43 +238,70 @@ export default function ModelViewerScreen({ onCapture, onClose, capturedCount = 
   // -------------------------------------------------------------------------
   const onContextCreate = useCallback(
     (gl) => {
-      glRef.current = gl;
+      try {
+        glRef.current = gl;
 
-      const renderer = new Renderer({ gl });
-      renderer.setSize(gl.drawingBufferWidth, gl.drawingBufferHeight);
-      renderer.setClearColor(0xf1f0ee, 1);
-      rendererRef.current = renderer;
+        const renderer = new Renderer({ gl });
+        renderer.setSize(gl.drawingBufferWidth, gl.drawingBufferHeight);
+        renderer.setClearColor(0xf1f0ee, 1);
+        // Without tone mapping, MeshStandardMaterial's PBR lighting clips
+        // straight to flat white once combined light intensity is high
+        // enough - which is exactly what was happening here: the light
+        // clay material and the light background both blew out to the
+        // same white, so real geometry rendered every frame but was
+        // visually indistinguishable from the empty canvas. ACES + a
+        // sane exposure keeps bright faces shaded instead of clipped.
+        renderer.toneMapping = THREE.ACESFilmicToneMapping;
+        renderer.toneMappingExposure = 1.0;
+        renderer.outputColorSpace = THREE.SRGBColorSpace;
+        rendererRef.current = renderer;
 
-      const scene = new THREE.Scene();
-      scene.background = new THREE.Color(0xf1f0ee);
-      sceneRef.current = scene;
+        const scene = new THREE.Scene();
+        scene.background = new THREE.Color(0xf1f0ee);
+        sceneRef.current = scene;
 
-      const camera = new THREE.PerspectiveCamera(
-        45,
-        gl.drawingBufferWidth / gl.drawingBufferHeight,
-        0.01,
-        2000
-      );
-      cameraRef.current = camera;
+        const camera = new THREE.PerspectiveCamera(
+          45,
+          gl.drawingBufferWidth / gl.drawingBufferHeight,
+          0.01,
+          2000
+        );
+        cameraRef.current = camera;
 
-      const hemi = new THREE.HemisphereLight(0xffffff, 0xb0aca6, 0.9);
-      scene.add(hemi);
-      const key = new THREE.DirectionalLight(0xffffff, 1.6);
-      key.position.set(5, 10, 7);
-      scene.add(key);
-      const rim = new THREE.DirectionalLight(0xffffff, 0.5);
-      rim.position.set(-6, 4, -8);
-      scene.add(rim);
+        const hemi = new THREE.HemisphereLight(0xffffff, 0xb0aca6, 0.9);
+        scene.add(hemi);
+        const key = new THREE.DirectionalLight(0xffffff, 0.9);
+        key.position.set(5, 10, 7);
+        scene.add(key);
+        const rim = new THREE.DirectionalLight(0xffffff, 0.3);
+        rim.position.set(-6, 4, -8);
+        scene.add(rim);
 
-      updateCamera();
+        updateCamera();
 
-      const renderLoop = () => {
-        frameRef.current = requestAnimationFrame(renderLoop);
-        renderer.render(scene, camera);
-        gl.endFrameEXP();
-      };
-      renderLoop();
-      setGlReady(true);
+        let framesRendered = 0;
+        const renderLoop = () => {
+          frameRef.current = requestAnimationFrame(renderLoop);
+          try {
+            renderer.render(scene, camera);
+            gl.endFrameEXP();
+            framesRendered += 1;
+          } catch (renderErr) {
+            if (frameRef.current) cancelAnimationFrame(frameRef.current);
+            setError(
+              "Render loop error (frame " + framesRendered + "): " +
+                String(renderErr && renderErr.message ? renderErr.message : renderErr)
+            );
+          }
+        };
+        renderLoop();
+        setGlReady(true);
+      } catch (setupErr) {
+        setError(
+          "GL context setup failed: " +
+            String(setupErr && setupErr.message ? setupErr.message : setupErr)
+        );
+      }
     },
     [updateCamera]
   );
@@ -282,11 +314,20 @@ export default function ModelViewerScreen({ onCapture, onClose, capturedCount = 
       color: 0xd9d5cf,
       roughness: 0.85,
       metalness: 0.0,
+      side: THREE.DoubleSide,
     });
     group.traverse((child) => {
       if (child.isMesh) {
         if (!child.userData._origMaterial) {
           child.userData._origMaterial = child.material;
+        }
+        // Some importers (OBJ/DAE round-trips especially) hand back geometry
+        // with inconsistent winding/normals. Backface culling on a
+        // FrontSide-only material then hides the whole mesh from every
+        // camera angle with no error - render DoubleSide unconditionally
+        // so a flipped-normal import is never invisible.
+        if (!enabled && child.userData._origMaterial) {
+          child.userData._origMaterial.side = THREE.DoubleSide;
         }
         child.material = enabled ? clay : child.userData._origMaterial;
       }
@@ -408,7 +449,8 @@ export default function ModelViewerScreen({ onCapture, onClose, capturedCount = 
     } catch (e) {
       console.warn("Model import failed:", e);
       setError(
-        "Could not load that model. Export as .glb (geometry only, no textures) and try again."
+        "Could not load that model: " +
+          String(e && e.message ? e.message : e)
       );
     } finally {
       setLoading(false);
