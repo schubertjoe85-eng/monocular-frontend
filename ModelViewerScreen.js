@@ -96,6 +96,8 @@ export default function ModelViewerScreen({ onCapture, onClose, capturedCount = 
   const cameraRef = useRef(null);
   const modelGroupRef = useRef(null);
   const frameRef = useRef(null);
+  const sunRef = useRef(null);
+  const moonRef = useRef(null);
 
   // Orbit state (spherical coordinates around a target point)
   const orbit = useRef({
@@ -252,7 +254,7 @@ export default function ModelViewerScreen({ onCapture, onClose, capturedCount = 
         // visually indistinguishable from the empty canvas. ACES + a
         // sane exposure keeps bright faces shaded instead of clipped.
         renderer.toneMapping = THREE.ACESFilmicToneMapping;
-        renderer.toneMappingExposure = 1.0;
+        renderer.toneMappingExposure = 0.75;
         renderer.outputColorSpace = THREE.SRGBColorSpace;
         rendererRef.current = renderer;
 
@@ -268,14 +270,37 @@ export default function ModelViewerScreen({ onCapture, onClose, capturedCount = 
         );
         cameraRef.current = camera;
 
-        const hemi = new THREE.HemisphereLight(0xffffff, 0xb0aca6, 0.9);
+        const hemi = new THREE.HemisphereLight(0xffffff, 0xb0aca6, 0.6);
         scene.add(hemi);
-        const key = new THREE.DirectionalLight(0xffffff, 0.9);
+        const key = new THREE.DirectionalLight(0xffffff, 0.55);
         key.position.set(5, 10, 7);
         scene.add(key);
-        const rim = new THREE.DirectionalLight(0xffffff, 0.3);
+        const rim = new THREE.DirectionalLight(0xffffff, 0.2);
         rim.position.set(-6, 4, -8);
         scene.add(rim);
+
+        // Visible sun/moon sky objects, not just abstract directional
+        // lights - daytime by default, matching the key light's direction,
+        // unless a future user-specified time of day moves them. Emissive
+        // MeshBasicMaterial so they read as glowing regardless of scene
+        // lighting; repositioned to scale with the model in frameModel.
+        const sun = new THREE.Mesh(
+          new THREE.SphereGeometry(1, 24, 24),
+          new THREE.MeshBasicMaterial({ color: 0xfff3d6, fog: false })
+        );
+        sun.position.copy(key.position).normalize().multiplyScalar(500);
+        sun.visible = true;
+        scene.add(sun);
+        sunRef.current = sun;
+
+        const moon = new THREE.Mesh(
+          new THREE.SphereGeometry(1, 24, 24),
+          new THREE.MeshBasicMaterial({ color: 0xd7dbe6, fog: false })
+        );
+        moon.position.copy(key.position).normalize().multiplyScalar(-500);
+        moon.visible = false;
+        scene.add(moon);
+        moonRef.current = moon;
 
         updateCamera();
 
@@ -360,6 +385,19 @@ export default function ModelViewerScreen({ onCapture, onClose, capturedCount = 
         cam.near = Math.max(maxDim / 1000, 0.01);
         cam.far = maxDim * 25;
         cam.updateProjectionMatrix();
+      }
+
+      // Scale the sun/moon distance and size to the model so they read as
+      // sky objects at any model scale, comfortably inside the far plane.
+      const skyDistance = maxDim * 12;
+      const skyRadius = maxDim * 0.6;
+      if (sunRef.current) {
+        sunRef.current.position.normalize().multiplyScalar(skyDistance);
+        sunRef.current.scale.setScalar(skyRadius);
+      }
+      if (moonRef.current) {
+        moonRef.current.position.normalize().multiplyScalar(skyDistance);
+        moonRef.current.scale.setScalar(skyRadius * 0.75);
       }
 
       updateCamera();
