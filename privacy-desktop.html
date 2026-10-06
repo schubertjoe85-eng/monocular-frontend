@@ -1,0 +1,57 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Monocular Desktop — Privacy Policy</title>
+<style>
+  body{font-family:-apple-system,BlinkMacSystemFont,"Helvetica Neue",Arial,sans-serif;line-height:1.6;max-width:720px;margin:40px auto;padding:0 20px;color:#1c1c1e}
+  h1{font-size:1.7rem;margin-bottom:.2rem} h2{font-size:1.15rem;margin-top:2rem}
+  .meta{color:#6b6b70;font-size:.9rem} li{margin:.35rem 0}
+</style>
+</head>
+<body>
+<h1>Monocular Desktop — Privacy Policy</h1>
+<p class="meta">Last updated: October 2026</p>
+
+<p>Monocular Desktop renders architectural visualisations entirely on your Mac by default. Two optional, separate tools can send data elsewhere if you choose to turn them on — see "Monocular Eye and Concept Massing" below. Everything else on this page describes the app's default, on-device behaviour.</p>
+
+<h2>What stays on your Mac</h2>
+<ul>
+  <li>Your 3D models, drawing-set PDFs, prompts, and the images and videos you render are processed on your Mac by default. They are never uploaded to us, and are not sent anywhere else unless you explicitly turn on Monocular Eye or use the Concept Massing tool, both described below.</li>
+  <li>Drawing sets are read on your Mac using Apple's on-device text recognition.</li>
+  <li>The app keeps its settings, and a cache of site information you have looked up, on your Mac only.</li>
+</ul>
+
+<h2>What is sent over the internet</h2>
+<p>When you enter a site address and press Find, the app looks up information about that place. Only the site's coordinates (and, for geocoding, the address text you typed) are sent. Nothing that identifies you is sent.</p>
+<ul>
+  <li><strong>Apple Maps / MapKit</strong> (Apple) converts the address to coordinates and provides satellite and map imagery. It is subject to Apple's privacy policy.</li>
+  <li><strong>OpenStreetMap, via the Overpass API</strong> provides building outlines, heights, trees and street lamps around the site.</li>
+  <li><strong>Open-Meteo.com</strong> provides terrain elevation (Copernicus DEM) and current weather (cloud cover and visibility) for the site.</li>
+</ul>
+<p>These requests go directly from your Mac to those services. We do not receive or store them.</p>
+<p>Map data © OpenStreetMap contributors. Weather and elevation data by Open-Meteo.com.</p>
+
+<h2>Monocular Eye and Concept Massing (optional, off by default)</h2>
+<p>Two tools in the app are separate from the main renderer and never run unless you deliberately turn them on by adding your own API key and selecting them:</p>
+<ul>
+  <li><strong>Monocular Eye</strong> is an alternative, opt-in render engine. If you select it and add your own OpenAI and/or Runway API key in Settings, the view you capture in the app (and your prompt) is sent directly from your Mac to <strong>OpenAI</strong> (to produce a polished still image) and, for video, on to <strong>Runway</strong> (to produce a short video). This only happens for the specific capture you choose to send, when you have chosen Monocular Eye as the render engine.</li>
+  <li><strong>Concept Massing</strong> is a separate, clearly-labelled tool for rough early-stage design exploration, not the exact-geometry renderer. If you add your own OpenAI API key in Settings, the text description (and sketch image, if you attach one) you type into this tool is sent directly from your Mac to <strong>OpenAI</strong> to read out basic massing facts (dimensions, storeys, roof shape). Without a key, this tool works entirely offline by reading your text locally — nothing is sent anywhere.</li>
+</ul>
+<p>In both cases: nothing is sent unless you have added your own API key and actively used that specific tool; your API keys are stored only in the app's local settings on your Mac and are sent only to OpenAI/Runway's own servers, never to us; we do not receive, see or store anything you send through these tools; and use of OpenAI and Runway is subject to their own privacy policies and terms, since you are connecting to them directly with your own account.</p>
+
+<h2>What we do not do</h2>
+<ul>
+  <li>There are no accounts, no sign-in, no subscriptions and no in-app purchases.</li>
+  <li>We do not collect, store or sell your data.</li>
+  <li>We do not use advertising, analytics or cross-app tracking.</li>
+</ul>
+
+<h2>Your content</h2>
+<p>You are responsible for having the right to use any models, drawings and images you load into the app, including any you choose to send to OpenAI or Runway via Monocular Eye or Concept Massing.</p>
+
+<h2>Contact</h2>
+<p>If you have questions about privacy, contact <a href="mailto:schubertjoe85@gmail.com">schubertjoe85@gmail.com</a>.</p>
+</body>
+</html>
