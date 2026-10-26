@@ -1,0 +1,44 @@
+<!doctype html>
+<html>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no">
+<style>
+  html, body { margin: 0; height: 100%; background: #111; color: #fff; font: 14px -apple-system, system-ui, sans-serif; overflow: hidden; -webkit-user-select: none; user-select: none; }
+  #view { position: fixed; top: 0; left: 0; display: block; touch-action: none; }
+  #panel { position: fixed; left: 0; right: 0; bottom: 0; background: #0b0b0b; border-top: 1px solid #262626; padding: 10px 14px calc(12px + env(safe-area-inset-bottom)); }
+  #status { color: #9fb8a8; font-size: 12px; min-height: 64px; line-height: 16px; }
+  .row { display: flex; gap: 8px; margin-top: 8px; align-items: center; }
+  button { flex: 1; min-width: 0; background: #222; color: #fff; border: 1px solid #333; border-radius: 12px; padding: 12px 4px; font-weight: 800; letter-spacing: .2px; font-size: 10px; }
+  button[hidden] { display: none; }
+  button.on { background: #2E4D3A; border-color: #2E4D3A; }
+  button.primary { background: #2E4D3A; border-color: #2E4D3A; }
+  button:disabled { opacity: .4; }
+  #timeRow { opacity: .45; }
+  #timeRow input { flex: 1; accent-color: #7FBF9A; }
+  #timeLabel { color: #aaa; font-size: 11px; margin-top: 2px; }
+</style>
+</head>
+<body>
+<canvas id="view"></canvas>
+<div id="panel">
+  <div id="status">Starting…</div>
+  <div class="row" id="timeRow"><span style="font-size:12px;color:#aaa">Time</span><input id="time" type="range" min="5" max="20" step="0.25" value="10"></div>
+  <div id="timeLabel"></div>
+  <div class="row">
+    <button id="openBtn">OPEN</button>
+    <button id="sketchBtn" title="Photograph a plan sketch and build the model from it">SKETCH</button>
+    <button id="clayBtn">CLAY</button>
+    <button id="moveBtn" title="Drag the model to its place on the site">MOVE</button>
+    <button id="spinBtn" title="Rotate the model 45° on the site">SPIN</button>
+    <button id="turnBtn" title="Stand a model up that came in on its side">TURN</button>
+  </div>
+  <div class="row">
+    <button id="captureBtn" disabled>QUICK CAPTURE</button>
+    <button id="winBtn" hidden title="Windows on the walls the sketch doesn't mark as glass or solid">WINDOWS</button>
+    <button id="renderBtn" class="primary" disabled>PHOTOREAL RENDER</button>
+  </div>
+</div>
+<script>/*__BUNDLE__*/</script>
+</body>
+</html>

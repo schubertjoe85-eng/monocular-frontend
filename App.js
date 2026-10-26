@@ -1,10 +1,15 @@
-// App.js — Monocular Build 141
-// Changes from Build 134:
-//   1. Added ViewerErrorBoundary: catches render-time errors inside the
-//      3D viewer (not just require-time errors) and shows an error screen
-//      with the real message instead of crashing the app.
-//   2. Companion to ModelViewerScreen v4 (pinch-zoom capture-phase fix,
-//      adaptive camera clip planes) and three@0.166.1 / expo-three@8.0.0.
+// App.js — Monocular 1.1
+// Changes from 1.0.4 (Build 149):
+//   1. No subscription. Monocular is a one-off purchase; RevenueCat, the
+//      paywall and the free-render limit are gone.
+//   2. On-phone rendering (LocalRenderScreen): an imported 3D model is
+//      rendered on the phone with Monocular Desktop's own engine — real sun,
+//      Clay or Photoreal, nothing uploaded, no key needed.
+//   3. AI renders use the user's own OpenAI (stills) and Runway (video) keys,
+//      straight from the phone (cloudApi.js), like desktop's Monocular Eye.
+//      The Monocular server is no longer used.
+//   4. Address lookup with Apple's own geocoder only; the site goes into the
+//      prompt and gives the on-phone renderer its real sun.
 
 import React, { useState, useRef, useEffect } from "react";
 import {
@@ -24,28 +29,34 @@ import {
 import { Video, ResizeMode } from "expo-av";
 import * as ImagePicker from "expo-image-picker";
 import * as MediaLibrary from "expo-media-library";
+import { geocodeAddress } from "./site";
 import * as FileSystem from "expo-file-system";
-import Purchases from "react-native-purchases";
 import OnboardingScreen, { shouldShowOnboarding } from "./OnboardingScreen";
-// NOTE: ModelViewerScreen is deliberately NOT imported here. Importing it at
-// the top level loads expo-gl/expo-three/three at app launch, and any
-// import-time error in that stack kills the app on the splash screen.
-// It is lazy-require()d inside the 3D viewer modal instead.
+import { loadKeys, saveKeys, prepareImage, buildStillPrompt, buildVideoPrompt, openAiStill, runwayVideo } from "./cloudApi";
+// NOTE: ModelViewerScreen and LocalRenderScreen are deliberately NOT imported
+// here. Importing them at the top level loads their GL / WebView stacks at app
+// launch, and any import-time error there kills the app on the splash screen.
+// They are lazy-require()d inside their modals instead.
 
-const API_URL = "https://monocular-server.onrender.com";
-const RC_API_KEY = "appl_jJKgQZQIYePcVeZnnwpGtHacrrB";
-const ENTITLEMENT_ID = "Monocular Pro";
+const PRIVACY_URL = "https://monocular-opal.vercel.app/privacy.html";
+const TERMS_URL = "https://monocular-opal.vercel.app/terms.html";
 
-// Render job polling
-const RENDER_POLL_INTERVAL_MS = 3000; // check status every 3s
-const RENDER_MAX_POLLS = 100;         // ~5 minutes, then give up with a clear error
+// App Store screenshot builds only (eas.json "screenshots" profile sets this at build time; it is undefined in
+// the App Store build, so none of the screenshot code below can run there). Reads Documents/screenshot.json to
+// put the real app into a given state: which screen, the site, and the on-phone render to show.
+const SCREENSHOT_MODE = process.env.EXPO_PUBLIC_SCREENSHOT_MODE === "1";
 
 const MODES = [
   { key: "render", label: "EXTERIOR" },
   { key: "interior", label: "INTERIOR" },
 ];
+const CAMS = [
+  { key: "orbit", label: "ORBIT" },
+  { key: "push", label: "PUSH IN" },
+  { key: "crane", label: "CRANE UP" },
+];
 
-// Catches errors thrown while the 3D viewer renders (not just at require
+// Catches errors thrown while a lazy screen renders (not just at require
 // time). A render-time failure shows an error screen instead of killing
 // the app.
 class ViewerErrorBoundary extends React.Component {
@@ -74,18 +85,18 @@ class ViewerErrorBoundary extends React.Component {
   }
 }
 
-// Lazy-loads the 3D viewer only when the modal is open. If the 3D stack
-// fails to load, this renders an error screen (with the real error message)
-// instead of crashing the app.
-function LazyModelViewer({ onCapture, onClose, capturedCount }) {
-  let ModelViewerScreen = null;
+// Lazy-loads a screen module only when its modal is open. If it fails to
+// load, this renders an error screen (with the real error message) instead of
+// crashing the app.
+function LazyScreen({ load, onClose, ...props }) {
+  let Screen = null;
   let loadError = null;
   try {
-    ModelViewerScreen = require("./ModelViewerScreen").default;
+    Screen = load();
   } catch (e) {
     loadError = e;
   }
-  if (loadError || !ModelViewerScreen) {
+  if (loadError || !Screen) {
     return (
       <View style={styles.viewerErrorContainer}>
         <Text style={styles.viewerErrorTitle}>3D VIEWER UNAVAILABLE</Text>
@@ -100,117 +111,112 @@ function LazyModelViewer({ onCapture, onClose, capturedCount }) {
   }
   return (
     <ViewerErrorBoundary onClose={onClose}>
-      <ModelViewerScreen onCapture={onCapture} onClose={onClose} capturedCount={capturedCount} />
+      <Screen onClose={onClose} {...props} />
     </ViewerErrorBoundary>
   );
 }
+const loadModelViewer = () => require("./ModelViewerScreen").default;
+const loadLocalRender = () => require("./LocalRenderScreen").default;
 
 export default function App() {
   const [tab, setTab] = useState("image");
   const [mode, setMode] = useState("render");
   const [prompt, setPrompt] = useState("");
+  const [siteAddress, setSiteAddress] = useState("");
+  const [siteLookupLoading, setSiteLookupLoading] = useState(false);
+  const [siteStatus, setSiteStatus] = useState("");
+  const [siteLocation, setSiteLocation] = useState(null); // { lat, lng, locality, region, roadName }
   const [selectedImage, setSelectedImage] = useState(null);
-  const [imageBase64, setImageBase64] = useState(null);
-  const [extraImages, setExtraImages] = useState([]);
   const [resultImage, setResultImage] = useState(null);
   const [loading, setLoading] = useState(false);
   const [saving, setSaving] = useState(false);
   const [videoLoading, setVideoLoading] = useState(false);
   const [videoStatus, setVideoStatus] = useState("");
+  const [videoSeconds, setVideoSeconds] = useState(5);
+  const [videoCam, setVideoCam] = useState("orbit");
   const [resultVideoUrl, setResultVideoUrl] = useState(null);
   const [savingVideo, setSavingVideo] = useState(false);
   const [message, setMessage] = useState("");
-  const pollRef = useRef(null);        // video polling
-  const renderPollRef = useRef(null);  // image render polling
-  const [isSubscribed, setIsSubscribed] = useState(false);
-  const [showPaywall, setShowPaywall] = useState(false);
-  const [purchasing, setPurchasing] = useState(false);
   const [showOnboarding, setShowOnboarding] = useState(false);
-  const [rcUserId, setRcUserId] = useState(null);
   const [fullscreenImage, setFullscreenImage] = useState(null);
   const [showModelViewer, setShowModelViewer] = useState(false);
-  // Real, localized price from the store - never hardcode a price string,
-  // since it drifts the moment App Store Connect pricing changes (as it just
-  // did: $19.99 -> $5.99) and differs by the subscriber's own storefront/currency.
-  const [priceString, setPriceString] = useState(null);
+  const [showLocalRender, setShowLocalRender] = useState(false);
+  const [startSketch, setStartSketch] = useState(false);   // open the renderer straight onto "photograph a sketch"
+  const [showSettings, setShowSettings] = useState(false);
+  const [keys, setKeys] = useState({ openAi: "", runway: "" });
+  const [keyDraft, setKeyDraft] = useState({ openAi: "", runway: "" });
+  const [showKeys, setShowKeys] = useState(false);
+  const videoStopRef = useRef(false);
+  const [shotDemo, setShotDemo] = useState(null);
+  const siteAddressRef = useRef("");
+  siteAddressRef.current = siteAddress;
 
   useEffect(() => {
-    async function initRevenueCat() {
-      try {
-        Purchases.configure({ apiKey: RC_API_KEY });
-        const info = await Purchases.getCustomerInfo();
-        setIsSubscribed(!!info.entitlements.active[ENTITLEMENT_ID]);
-        const id = await Purchases.getAppUserID();
-        setRcUserId(id || null);
-        const offerings = await Purchases.getOfferings();
-        const pkg = offerings.current && offerings.current.availablePackages.length > 0
-          ? offerings.current.availablePackages[0] : null;
-        if (pkg) setPriceString(pkg.product.priceString);
-      } catch (error) {
-        console.log("RevenueCat init error:", error);
-      }
-    }
-    initRevenueCat();
+    loadKeys().then(setKeys).catch(() => {});
+    if (SCREENSHOT_MODE) { applyScreenshotState(); return; }
     shouldShowOnboarding().then(setShowOnboarding);
-
-    // Clean up any running polls if the app unmounts.
-    return () => {
-      if (pollRef.current) clearInterval(pollRef.current);
-      if (renderPollRef.current) clearInterval(renderPollRef.current);
-    };
   }, []);
 
-  // Stable per-install identity sent to the server so the free-render
-  // guard tracks users instead of IPs, and subscribers are never blocked.
-  function identityFields() {
-    return {
-      email: rcUserId || null,
-      subscriptionActive: isSubscribed,
-      platform: "ios",
-    };
-  }
-
-  // /api/video/multi verifies the subscriber via this RevenueCat id header
-  // (matching the desktop app), rather than trusting a client-sent flag.
-  function rcHeaders() {
-    return rcUserId ? { "x-rc-user-id": rcUserId } : {};
-  }
-
-  async function buySubscription() {
+  async function applyScreenshotState() {
     try {
-      setPurchasing(true);
-      const offerings = await Purchases.getOfferings();
-      const pkg = offerings.current && offerings.current.availablePackages.length > 0
-        ? offerings.current.availablePackages[0] : null;
-      if (!pkg) { setMessage("No subscription available right now."); return; }
-      const { customerInfo } = await Purchases.purchasePackage(pkg);
-      if (customerInfo.entitlements.active[ENTITLEMENT_ID]) {
-        setIsSubscribed(true);
-        setShowPaywall(false);
-        setMessage("Subscription active. Thank you!");
+      const dir = FileSystem.documentDirectory;
+      const shot = JSON.parse(await FileSystem.readAsStringAsync(dir + "screenshot.json"));
+      if (shot.onboarding) { setShowOnboarding(true); return; }
+      if (shot.prompt) setPrompt(shot.prompt);
+      if (shot.tab) setTab(shot.tab);
+      if (shot.keys) setKeys(shot.keys);
+      if (shot.image) setSelectedImage(dir + shot.image);
+      if (shot.result) { setResultImage(dir + shot.result); setMessage(shot.message || ""); }
+      if (shot.address) { setSiteAddress(shot.address); siteAddressRef.current = shot.address; await handleFindAddress(); }
+      if (shot.screen === "settings") { openSettings(); if (shot.keys) setKeyDraft(shot.keys); }
+      if (shot.screen === "local") {
+        setShotDemo({ ...(shot.local || {}), ...(shot.sketch ? { sketch: dir + shot.sketch } : { uri: dir + shot.model, name: shot.model }) });
+        setShowLocalRender(true);
       }
-    } catch (error) {
-      setMessage(error.userCancelled ? "Purchase cancelled." : "Purchase failed.");
-    } finally {
-      setPurchasing(false);
+    } catch (e) {
+      setMessage("Screenshot setup failed: " + (e.message || e));
     }
   }
 
-  async function restorePurchases() {
+  function openSettings(note) {
+    setKeyDraft(keys);
+    setShowKeys(false);
+    setShowSettings(true);
+    if (note) setMessage(note);
+  }
+
+  async function handleSaveKeys() {
     try {
-      setPurchasing(true);
-      const info = await Purchases.restorePurchases();
-      if (info.entitlements.active[ENTITLEMENT_ID]) {
-        setIsSubscribed(true);
-        setShowPaywall(false);
-        setMessage("Purchases restored.");
-      } else {
-        setMessage("No active subscription found.");
-      }
-    } catch (error) {
-      setMessage("Restore failed.");
+      await saveKeys(keyDraft);
+      const stored = await loadKeys();
+      setKeys(stored);
+      setShowSettings(false);
+      setMessage(stored.openAi || stored.runway ? "Keys saved on this phone." : "Keys removed.");
+    } catch (e) {
+      setMessage("Couldn't save the keys: " + (e.message || e));
+    }
+  }
+
+  // Address -> real site, Apple only (site.js): the site goes into the AI
+  // prompts and puts the model on its satellite ground with the real sun in
+  // the on-phone renderer.
+  async function handleFindAddress() {
+    const address = siteAddressRef.current.trim();
+    if (!address) { setSiteStatus(""); setSiteLocation(null); return; }
+
+    setSiteLookupLoading(true);
+    setSiteStatus("Looking up address...");
+    setSiteLocation(null);
+
+    try {
+      const location = await geocodeAddress(address);
+      setSiteLocation(location);
+      const locBits = [location.locality, location.region].filter(Boolean).join(", ");
+      setSiteStatus(`Found — ${locBits || "site located"}. Real sun and satellite ground on, site added to AI prompts.`);
+    } catch (e) {
+      setSiteStatus(e.message || "Lookup failed — try again.");
     } finally {
-      setPurchasing(false);
+      setSiteLookupLoading(false);
     }
   }
 
@@ -218,13 +224,10 @@ export default function App() {
     try {
       const result = await ImagePicker.launchImageLibraryAsync({
         mediaTypes: ImagePicker.MediaTypeOptions.Images,
-        quality: 0.9,
-        base64: true,
+        quality: 1,
       });
       if (!result.canceled && result.assets?.length > 0) {
-        const asset = result.assets[0];
-        setSelectedImage(asset.uri);
-        setImageBase64(asset.base64 || null);
+        setSelectedImage(result.assets[0].uri);
         setResultImage(null);
         setResultVideoUrl(null);
         setMessage("Image loaded.");
@@ -234,138 +237,47 @@ export default function App() {
     }
   }
 
-  // Captured 3D model view -> same pipeline as a picked photo.
-  // Called once per capture from the 3D viewer. Keeps the viewer open for
-  // up to 3 angles (matching desktop's orbit -> capture -> orbit -> capture
-  // flow) instead of closing after the first - previously this closed the
-  // viewer immediately, so there was no way to capture a 2nd/3rd angle of
-  // the same model for multi-angle video.
-  async function handleModelCapture(uri) {
-    try {
-      const base64 = await FileSystem.readAsStringAsync(uri, {
-        encoding: FileSystem.EncodingType.Base64,
-      });
-      if (!imageBase64) {
-        setSelectedImage(uri);
-        setImageBase64(base64);
-        setResultImage(null);
-        setResultVideoUrl(null);
-        setMessage("View 1 captured. Orbit and capture more angles, or tap Done.");
-      } else if (extraImages.length < 2) {
-        setExtraImages([...extraImages, { uri, base64 }]);
-        const count = extraImages.length + 2;
-        setMessage(
-          count >= 3
-            ? "3 views captured."
-            : `View ${count} captured. Orbit and capture another, or tap Done.`
-        );
-        if (count >= 3) setShowModelViewer(false);
-      }
-    } catch (error) {
-      setMessage("Could not use the captured view.");
-    }
+  // A captured 3D model view is used exactly like a picked photo.
+  function handleModelCapture(uri) {
+    setSelectedImage(uri);
+    setResultImage(null);
+    setResultVideoUrl(null);
+    setShowModelViewer(false);
+    setMessage("View captured.");
   }
 
-  async function pickExtraImage() {
-    if (extraImages.length >= 2) { setMessage("Up to 3 images total."); return; }
-    try {
-      const result = await ImagePicker.launchImageLibraryAsync({
-        mediaTypes: ImagePicker.MediaTypeOptions.Images,
-        quality: 0.9,
-        base64: true,
-      });
-      if (!result.canceled && result.assets?.length > 0) {
-        const asset = result.assets[0];
-        setExtraImages([...extraImages, { uri: asset.uri, base64: asset.base64 || null }]);
-        setMessage("Added angle " + (extraImages.length + 2) + ".");
-      }
-    } catch (error) {
-      setMessage("Could not add image.");
-    }
+  // A finished on-phone render: show it as the result, and make it the image
+  // for an AI still or video too.
+  function handleLocalResult(uri, _base64, info) {
+    setShowLocalRender(false);
+    setResultImage(uri);
+    setSelectedImage(uri);
+    setResultVideoUrl(null);
+    setTab("image");
+    setMessage(info && info.quick
+      ? "Captured on this phone."
+      : `Rendered on this phone${info && info.realSun ? " with the real sun for your site" : ""}.`);
   }
 
-  // Returns true when the server's response means the free render is used up.
-  function isFreeLimitError(status, errorText) {
-    if (status === 402 || status === 403 || status === 429) return true;
-    if (!errorText) return false;
-    return /free|limit|credit|subscri/i.test(errorText);
-  }
-
-  function stopRenderPolling() {
-    if (renderPollRef.current) {
-      clearInterval(renderPollRef.current);
-      renderPollRef.current = null;
-    }
-  }
-
-  // ---- RENDER: job pattern (start + poll) ----
-  // POST /render/start returns { ok, jobId } immediately (402 = free render used).
-  // GET /render/status/:jobId returns:
-  //   { ok: true,  status: "pending" }
-  //   { ok: true,  status: "done", image }
-  //   { ok: false, status: "failed" | "not_found", error }
+  // ---- AI still: straight to OpenAI with the user's own key ----
   async function renderImage() {
-    // Non-subscribers get one free render — the server enforces it.
-    if (!prompt.trim() && !imageBase64) { setMessage("Add a brief or upload an image first."); return; }
-    stopRenderPolling();
+    if (!selectedImage) { setMessage("Import an image or capture a 3D view first."); return; }
+    if (!keys.openAi) { openSettings("AI renders use your own OpenAI key — add it in Settings."); return; }
     try {
       setLoading(true);
-      setMessage(isSubscribed ? "Starting render..." : "Starting your free render...");
       setResultImage(null);
-      const response = await fetch(API_URL + "/render/start", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ prompt, imageBase64, mode, ...identityFields() }),
-      });
-      const data = await response.json();
-      if (!data.ok || !data.jobId) {
-        if (!isSubscribed && isFreeLimitError(response.status, data.error)) {
-          setShowPaywall(true);
-          setMessage("Your free render has been used. Subscribe for unlimited rendering.");
-        } else {
-          setMessage(data.error || "Render failed to start.");
-        }
-        setLoading(false);
-        return;
-      }
-      setMessage("Rendering... high-fidelity renders can take a minute or two.");
-      pollRender(data.jobId);
+      setMessage("Preparing image...");
+      const image = await prepareImage(selectedImage);
+      setMessage("Rendering via OpenAI... this usually takes under a minute.");
+      const still = buildStillPrompt(prompt.trim(), { interior: mode === "interior", site: siteLocation, address: siteAddress.trim() });
+      const uri = await openAiStill(keys.openAi, image, still);
+      setResultImage(uri);
+      setMessage("Render complete. Tap the image to view full screen.");
     } catch (error) {
-      setMessage("Server connection failed.");
+      setMessage(error.message || "Render failed.");
+    } finally {
       setLoading(false);
     }
-  }
-
-  function pollRender(jobId) {
-    let polls = 0;
-    renderPollRef.current = setInterval(async () => {
-      polls += 1;
-      if (polls > RENDER_MAX_POLLS) {
-        stopRenderPolling();
-        setLoading(false);
-        setMessage("Render timed out. Please try again.");
-        return;
-      }
-      try {
-        const response = await fetch(API_URL + "/render/status/" + jobId);
-        const data = await response.json();
-        if (data.status === "done" && data.image) {
-          stopRenderPolling();
-          setResultImage(data.image);
-          setLoading(false);
-          setMessage("Render complete. Tap the image to view full screen.");
-        } else if (data.status === "failed" || data.status === "not_found" || data.ok === false) {
-          // "not_found" means the server restarted mid-render — the user can
-          // simply retry (the free-render map reset too, so nothing is lost).
-          stopRenderPolling();
-          setLoading(false);
-          setMessage(data.error || "Render failed. Please try again.");
-        }
-        // status === "pending": keep polling silently.
-      } catch (error) {
-        // Transient network blip — keep polling until MAX_POLLS.
-      }
-    }, RENDER_POLL_INTERVAL_MS);
   }
 
   async function saveImage() {
@@ -374,13 +286,7 @@ export default function App() {
       setSaving(true);
       const permission = await MediaLibrary.requestPermissionsAsync();
       if (!permission.granted) { setMessage("Photos permission required."); return; }
-      let fileUri = resultImage;
-      if (resultImage.startsWith("data:image")) {
-        const base64 = resultImage.split(",")[1];
-        fileUri = FileSystem.cacheDirectory + "monocular-render-" + Date.now() + ".png";
-        await FileSystem.writeAsStringAsync(fileUri, base64, { encoding: FileSystem.EncodingType.Base64 });
-      }
-      const asset = await MediaLibrary.createAssetAsync(fileUri);
+      const asset = await MediaLibrary.createAssetAsync(resultImage);
       await MediaLibrary.createAlbumAsync("Monocular", asset, false);
       setMessage("Saved to Photos.");
     } catch (error) {
@@ -390,130 +296,39 @@ export default function App() {
     }
   }
 
+  // ---- Video: Runway with the user's own key. As on desktop, the image is
+  // first polished into a photograph by OpenAI when that key is there too —
+  // Runway rejects far fewer clips made from photographic stills. ----
   async function renderVideo() {
-    // Video remains Pro-only.
-    if (!isSubscribed) { setShowPaywall(true); return; }
-    if (!prompt.trim() && !imageBase64) { setMessage("Add a brief or upload an image first."); return; }
+    if (!selectedImage) { setMessage("Import an image or capture a 3D view first."); return; }
+    if (!keys.runway) { openSettings("Videos use your own Runway key — add it in Settings."); return; }
+    videoStopRef.current = false;
     try {
       setVideoLoading(true);
       setResultVideoUrl(null);
-      setVideoStatus("Submitting video job...");
       setMessage("");
-      const images = [imageBase64, ...extraImages.map(x => x.base64)].filter(Boolean);
-      // 2+ captured angles stitch into one video (desktop's multi-angle
-      // flow); a single image keeps using the legacy endpoint.
-      const multi = images.length > 1;
-      const response = await fetch(API_URL + (multi ? "/api/video/multi" : "/api/video"), {
-        method: "POST",
-        headers: { "Content-Type": "application/json", ...rcHeaders() },
-        body: JSON.stringify(
-          multi
-            ? { prompt, images, mode, ratio: "960:960" }
-            : { prompt, imageBase64, images, mode, ...identityFields() }
-        ),
-      });
-      const data = await response.json();
-      if (multi) {
-        if (!data.ok || !data.jobId) {
-          setVideoStatus("");
-          setMessage(data.error || "Video request failed.");
-          setVideoLoading(false);
-          return;
-        }
-        pollMultiVideo(data.jobId);
-      } else {
-        if (!data.ok || !data.video?.id) {
-          setVideoStatus("");
-          setMessage(data.error || "Video request failed.");
-          setVideoLoading(false);
-          return;
-        }
-        pollVideo(data.video.id);
+      setVideoStatus("Preparing image...");
+      let image = await prepareImage(selectedImage);
+      const site = { site: siteLocation, address: siteAddress.trim() };
+      if (keys.openAi) {
+        setVideoStatus("Making the still photographic via OpenAI...");
+        const polished = await openAiStill(keys.openAi, image, buildStillPrompt(prompt.trim(), { interior: mode === "interior", ...site }));
+        if (videoStopRef.current) throw new Error("Video cancelled.");
+        image = await prepareImage(polished);
       }
+      const uri = await runwayVideo(
+        keys.runway, image,
+        gentle => buildVideoPrompt(prompt.trim(), { cam: videoCam, gentle, ...site }),
+        videoSeconds, setVideoStatus, () => videoStopRef.current
+      );
+      setResultVideoUrl(uri);
+      setMessage("Video render complete.");
     } catch (error) {
-      setMessage("Server connection failed.");
+      setMessage(error.message || "Video generation failed.");
+    } finally {
+      setVideoStatus("");
       setVideoLoading(false);
     }
-  }
-
-  // /api/video/multi/file/:jobId is single-use (the server deletes its
-  // buffer on first fetch), so download it to a local file exactly once here
-  // rather than pointing <Video>/saveVideo at the remote URL directly - a
-  // second fetch (playback then save) would otherwise 404.
-  function pollMultiVideo(jobId) {
-    if (pollRef.current) clearInterval(pollRef.current);
-    pollRef.current = setInterval(async () => {
-      try {
-        const response = await fetch(API_URL + "/api/video/multi/status/" + jobId);
-        const data = await response.json();
-        setVideoStatus("Status: " + (data.status || "processing") + "...");
-        if (data.status === "done" && data.url) {
-          clearInterval(pollRef.current);
-          setVideoStatus("");
-          setMessage("Finalising video...");
-          try {
-            const fileUri = FileSystem.cacheDirectory + "monocular-multi-" + jobId + ".mp4";
-            const download = await FileSystem.downloadAsync(API_URL + data.url, fileUri);
-            setResultVideoUrl(download.uri);
-            setMessage("Video render complete.");
-          } catch (e) {
-            setMessage("Video finished, but could not be retrieved.");
-          }
-          setVideoLoading(false);
-        } else if (data.status === "failed" || data.ok === false) {
-          clearInterval(pollRef.current);
-          setVideoLoading(false);
-          setVideoStatus("");
-          setMessage(data.error || "Video generation failed.");
-        }
-      } catch (error) {}
-    }, 4000);
-  }
-
-  function pollVideo(videoId) {
-    if (pollRef.current) clearInterval(pollRef.current);
-    pollRef.current = setInterval(async () => {
-      try {
-        const response = await fetch(API_URL + "/api/video/" + videoId);
-        const data = await response.json();
-        if (!data.ok) {
-          clearInterval(pollRef.current);
-          setVideoLoading(false);
-          setVideoStatus("");
-          setMessage(data.error || "Video status check failed.");
-          return;
-        }
-        const status = data.video?.status;
-        setVideoStatus("Status: " + (status || "processing") + "...");
-        if (status === "completed" || status === "succeeded") {
-          clearInterval(pollRef.current);
-          setVideoLoading(false);
-          setVideoStatus("");
-          setMessage("Finalising video...");
-          setTimeout(async () => {
-            try {
-              const ur = await fetch(API_URL + "/api/video/" + videoId + "/url");
-              const ud = await ur.json();
-              if (ud.ok && ud.url) {
-                setResultVideoUrl(ud.url);
-                setMessage("Video render complete.");
-              } else {
-                setResultVideoUrl(API_URL + "/api/video/" + videoId + "/content");
-                setMessage("Video render complete.");
-              }
-            } catch (e) {
-              setResultVideoUrl(API_URL + "/api/video/" + videoId + "/content");
-              setMessage("Video render complete.");
-            }
-          }, 3000);
-        } else if (status === "failed" || status === "error") {
-          clearInterval(pollRef.current);
-          setVideoLoading(false);
-          setVideoStatus("");
-          setMessage("Video generation failed.");
-        }
-      } catch (error) {}
-    }, 4000);
   }
 
   async function saveVideo() {
@@ -523,15 +338,7 @@ export default function App() {
       setMessage("Saving video...");
       const permission = await MediaLibrary.requestPermissionsAsync();
       if (!permission.granted) { setMessage("Photos permission required."); return; }
-      // Multi-angle videos are already a local file (see pollMultiVideo) -
-      // re-downloading a single-use remote URL a second time would 404.
-      const localUri = resultVideoUrl.startsWith("file://")
-        ? resultVideoUrl
-        : (await FileSystem.downloadAsync(
-            resultVideoUrl,
-            FileSystem.cacheDirectory + "monocular-video-" + Date.now() + ".mp4"
-          )).uri;
-      const asset = await MediaLibrary.createAssetAsync(localUri);
+      const asset = await MediaLibrary.createAssetAsync(resultVideoUrl);
       await MediaLibrary.createAlbumAsync("Monocular", asset, false);
       setMessage("Video saved to Photos.");
     } catch (error) {
@@ -544,11 +351,32 @@ export default function App() {
   if (showOnboarding) {
     return (
       <OnboardingScreen
-        onTryFree={() => setShowOnboarding(false)}
-        onSeePro={() => { setShowOnboarding(false); setShowPaywall(true); }}
+        onStart={() => setShowOnboarding(false)}
+        onAddKeys={() => { setShowOnboarding(false); openSettings(); }}
       />
     );
   }
+
+  const keyField = (label, field, placeholder, url) => (
+    <View style={styles.keyBlock}>
+      <View style={styles.keyLabelRow}>
+        <Text style={styles.keyLabel}>{label}</Text>
+        <TouchableOpacity onPress={() => Linking.openURL(url)}>
+          <Text style={styles.keyLink}>Get a key</Text>
+        </TouchableOpacity>
+      </View>
+      <TextInput
+        style={styles.addressInput}
+        placeholder={placeholder}
+        placeholderTextColor="#555"
+        autoCapitalize="none"
+        autoCorrect={false}
+        secureTextEntry={!showKeys}
+        value={keyDraft[field]}
+        onChangeText={v => setKeyDraft({ ...keyDraft, [field]: v })}
+      />
+    </View>
+  );
 
   return (
     <KeyboardAvoidingView
@@ -561,33 +389,41 @@ export default function App() {
         keyboardShouldPersistTaps="handled"
         keyboardDismissMode="interactive"
       >
+        <TouchableOpacity style={styles.settingsButton} onPress={() => openSettings()}>
+          <Text style={styles.settingsButtonText}>SETTINGS</Text>
+        </TouchableOpacity>
         <Image source={require("./assets/logo.png")} style={styles.logoMark} />
         <Text style={styles.subtitle}>Rational Architectural Visualisation</Text>
 
-        <Modal visible={showPaywall} transparent animationType="slide">
-          <View style={styles.paywallOverlay}>
+        {/* Settings: the user's own AI keys, kept in the iOS Keychain */}
+        <Modal visible={showSettings} transparent animationType="slide">
+          <KeyboardAvoidingView style={styles.paywallOverlay} behavior={Platform.OS === "ios" ? "padding" : undefined}>
             <View style={styles.paywallCard}>
-              <Text style={styles.paywallTitle}>MONOCULAR PRO</Text>
-              <Text style={styles.paywallPrice}>{priceString ? `${priceString} / month — auto-renewing` : "Loading price…"}</Text>
-              <Text style={styles.paywallBody}>Your first render is free. Subscribe to unlock unlimited photorealistic architectural renders and 3D walkthrough videos.</Text>
-              <TouchableOpacity style={[styles.buttonLight, purchasing && styles.disabled]} onPress={buySubscription} disabled={purchasing}>
-                {purchasing ? <ActivityIndicator color="#fff" /> : <Text style={styles.buttonLightText}>{priceString ? `SUBSCRIBE — ${priceString}/MONTH` : "SUBSCRIBE"}</Text>}
+              <Text style={styles.paywallTitle}>SETTINGS</Text>
+              <Text style={styles.paywallBody}>
+                On-phone renders need no key. AI stills use your OpenAI account and videos use your Runway account — you pay them directly for what you use. Keys are stored only in this phone's Keychain and are sent only to OpenAI or Runway.
+              </Text>
+              {keyField("OPENAI API KEY", "openAi", "sk-...", "https://platform.openai.com/api-keys")}
+              {keyField("RUNWAY API KEY", "runway", "key_...", "https://dev.runwayml.com/")}
+              <TouchableOpacity onPress={() => setShowKeys(!showKeys)}>
+                <Text style={styles.paywallLink}>{showKeys ? "Hide keys" : "Show keys"}</Text>
               </TouchableOpacity>
-              <TouchableOpacity onPress={restorePurchases} disabled={purchasing}>
-                <Text style={styles.paywallLink}>Restore purchases</Text>
+              <TouchableOpacity style={[styles.buttonLight, styles.fullWidth]} onPress={handleSaveKeys}>
+                <Text style={styles.buttonLightText}>SAVE</Text>
               </TouchableOpacity>
-              <TouchableOpacity onPress={() => setShowPaywall(false)}>
-                <Text style={styles.paywallLink}>Not now</Text>
+              <TouchableOpacity onPress={() => setShowSettings(false)}>
+                <Text style={styles.paywallLink}>Cancel</Text>
               </TouchableOpacity>
-              <TouchableOpacity onPress={() => Linking.openURL("https://monocular-opal.vercel.app/privacy.html")}>
-                <Text style={styles.paywallLink}>Privacy Policy</Text>
-              </TouchableOpacity>
-              <TouchableOpacity onPress={() => Linking.openURL("https://monocular-opal.vercel.app/terms.html")}>
-                <Text style={styles.paywallLink}>Terms of Use</Text>
-              </TouchableOpacity>
-              <Text style={styles.paywallSmall}>Payment charged to Apple ID at confirmation. Subscription renews automatically unless cancelled at least 24 hours before the renewal date.</Text>
+              <View style={styles.linkRow}>
+                <TouchableOpacity onPress={() => Linking.openURL(PRIVACY_URL)}>
+                  <Text style={styles.paywallLink}>Privacy Policy</Text>
+                </TouchableOpacity>
+                <TouchableOpacity onPress={() => Linking.openURL(TERMS_URL)}>
+                  <Text style={styles.paywallLink}>Terms of Use</Text>
+                </TouchableOpacity>
+              </View>
             </View>
-          </View>
+          </KeyboardAvoidingView>
         </Modal>
 
         {/* Fullscreen viewer: tap a render to inspect, pinch to zoom */}
@@ -617,23 +453,81 @@ export default function App() {
           </View>
         </Modal>
 
-        {/* 3D model viewer: lazy-loaded so the GL stack only loads on demand */}
+        {/* 3D model viewer (capture a view for an AI render): lazy-loaded */}
         <Modal visible={showModelViewer} transparent={false} animationType="slide">
           {showModelViewer && (
-            <LazyModelViewer
+            <LazyScreen
+              load={loadModelViewer}
               onCapture={handleModelCapture}
               onClose={() => setShowModelViewer(false)}
-              capturedCount={imageBase64 ? 1 + extraImages.length : 0}
+              capturedCount={0}
             />
           )}
         </Modal>
 
+        {/* On-phone renderer: lazy-loaded */}
+        <Modal visible={showLocalRender} transparent={false} animationType="slide">
+          {showLocalRender && (
+            <LazyScreen
+              load={loadLocalRender}
+              site={siteLocation}
+              address={siteAddress}
+              onSiteFound={(a, loc) => {
+                setSiteAddress(a); setSiteLocation(loc);
+                setSiteStatus(`Found — ${[loc.locality, loc.region].filter(Boolean).join(", ") || "site located"}. Real sun and satellite ground on, site added to AI prompts.`);
+              }}
+              demo={shotDemo}
+              startSketch={startSketch}
+              onResult={handleLocalResult}
+              onClose={() => setShowLocalRender(false)}
+            />
+          )}
+        </Modal>
+
+        <View style={styles.card}>
+          <Text style={styles.sectionLabel}>RENDER ON THIS PHONE</Text>
+          <Text style={styles.sectionNote}>Your 3D model (.dae, .glb, .obj), or one built from a photo of your sketch, on the real site — Apple Maps satellite ground and the real sun. Clay or Photoreal. Your model is never uploaded and no key is needed.</Text>
+          <TouchableOpacity style={[styles.buttonLight, styles.noTopMargin]} onPress={() => { setStartSketch(false); setShowLocalRender(true); }}>
+            <Text style={styles.buttonLightText}>OPEN 3D MODEL</Text>
+          </TouchableOpacity>
+          <TouchableOpacity style={[styles.buttonDark, styles.sketchButton]} onPress={() => { setStartSketch(true); setShowLocalRender(true); }}>
+            <Text style={styles.buttonDarkText}>BUILD FROM A SKETCH</Text>
+          </TouchableOpacity>
+        </View>
+
+        <View style={styles.addressCard}>
+          <Text style={styles.sectionLabel}>SITE</Text>
+          <View style={styles.addressRowTop}>
+            <TextInput
+              style={styles.addressInput}
+              placeholder="Street address (optional)"
+              placeholderTextColor="#777"
+              autoCapitalize="words"
+              value={siteAddress}
+              onChangeText={setSiteAddress}
+              onSubmitEditing={handleFindAddress}
+              returnKeyType="search"
+            />
+            <TouchableOpacity
+              style={[styles.findButton, siteLookupLoading && styles.disabled]}
+              onPress={handleFindAddress}
+              disabled={siteLookupLoading}
+            >
+              {siteLookupLoading
+                ? <ActivityIndicator color="#fff" size="small" />
+                : <Text style={styles.findButtonText}>FIND</Text>}
+            </TouchableOpacity>
+          </View>
+          {!!siteStatus && <Text style={styles.siteStatus}>{siteStatus}</Text>}
+        </View>
+
+        <Text style={styles.sectionHeading}>AI RENDERS · YOUR OWN KEYS</Text>
         <View style={styles.tabRow}>
           <TouchableOpacity style={[styles.tabButton, tab === "image" && styles.tabButtonActive]} onPress={() => setTab("image")}>
             <Text style={[styles.tabText, tab === "image" && styles.tabTextActive]}>IMAGE</Text>
           </TouchableOpacity>
           <TouchableOpacity style={[styles.tabButton, tab === "video" && styles.tabButtonActive]} onPress={() => setTab("video")}>
-            <Text style={[styles.tabText, tab === "video" && styles.tabTextActive]}>3D VIDEO</Text>
+            <Text style={[styles.tabText, tab === "video" && styles.tabTextActive]}>VIDEO</Text>
           </TouchableOpacity>
         </View>
 
@@ -643,7 +537,7 @@ export default function App() {
           </TouchableOpacity>
 
           <TouchableOpacity style={styles.buttonDark} onPress={() => setShowModelViewer(true)}>
-            <Text style={styles.buttonDarkText}>IMPORT 3D MODEL</Text>
+            <Text style={styles.buttonDarkText}>CAPTURE A 3D VIEW</Text>
           </TouchableOpacity>
 
           {selectedImage && (
@@ -666,7 +560,7 @@ export default function App() {
 
           <TextInput
             style={styles.input}
-            placeholder="Describe the render direction..."
+            placeholder="Describe the design — materials, colours, glazing..."
             placeholderTextColor="#777"
             multiline
             scrollEnabled={false}
@@ -677,7 +571,7 @@ export default function App() {
           {tab === "image" ? (
             <>
               <TouchableOpacity style={[styles.buttonLight, loading && styles.disabled]} onPress={renderImage} disabled={loading}>
-                {loading ? <ActivityIndicator color="#fff" /> : <Text style={styles.buttonLightText}>{isSubscribed ? "RENDER" : "RENDER — 1 FREE"}</Text>}
+                {loading ? <ActivityIndicator color="#fff" /> : <Text style={styles.buttonLightText}>AI RENDER{keys.openAi ? "" : " — ADD OPENAI KEY"}</Text>}
               </TouchableOpacity>
               {resultImage && (
                 <>
@@ -692,17 +586,28 @@ export default function App() {
             </>
           ) : (
             <>
-              <TouchableOpacity style={styles.buttonDark} onPress={pickExtraImage}>
-                <Text style={styles.buttonDarkText}>ADD ANGLE (UP TO 3)</Text>
-              </TouchableOpacity>
-              {extraImages.length > 0 && (
-                <View style={styles.thumbRow}>
-                  {extraImages.map((img, i) => <Image key={i} source={{ uri: img.uri }} style={styles.thumb} />)}
-                </View>
-              )}
+              <View style={[styles.modeRow, styles.optionRowTop]}>
+                {[5, 10].map(s => (
+                  <TouchableOpacity key={s} style={[styles.modeButton, videoSeconds === s && styles.modeButtonActive]} onPress={() => setVideoSeconds(s)}>
+                    <Text style={[styles.modeText, videoSeconds === s && styles.modeTextActive]}>{s} SEC</Text>
+                  </TouchableOpacity>
+                ))}
+              </View>
+              <View style={styles.modeRow}>
+                {CAMS.map(c => (
+                  <TouchableOpacity key={c.key} style={[styles.modeButton, videoCam === c.key && styles.modeButtonActive]} onPress={() => setVideoCam(c.key)}>
+                    <Text style={[styles.modeText, videoCam === c.key && styles.modeTextActive]}>{c.label}</Text>
+                  </TouchableOpacity>
+                ))}
+              </View>
               <TouchableOpacity style={[styles.buttonLight, videoLoading && styles.disabled]} onPress={renderVideo} disabled={videoLoading}>
-                {videoLoading ? <ActivityIndicator color="#fff" /> : <Text style={styles.buttonLightText}>GENERATE VIDEO — PRO</Text>}
+                {videoLoading ? <ActivityIndicator color="#fff" /> : <Text style={styles.buttonLightText}>GENERATE VIDEO{keys.runway ? "" : " — ADD RUNWAY KEY"}</Text>}
               </TouchableOpacity>
+              {videoLoading && (
+                <TouchableOpacity onPress={() => { videoStopRef.current = true; setVideoStatus("Cancelling..."); }}>
+                  <Text style={styles.paywallLink}>Cancel video</Text>
+                </TouchableOpacity>
+              )}
               {videoStatus ? <Text style={styles.message}>{videoStatus}</Text> : null}
               {resultVideoUrl && (
                 <>
@@ -732,8 +637,19 @@ export default function App() {
 const styles = StyleSheet.create({
   page: { flex: 1, backgroundColor: "#050505" },
   content: { padding: 22, paddingTop: 70, paddingBottom: 120, alignItems: "center" },
+  settingsButton: { position: "absolute", top: 62, right: 22, backgroundColor: "#151515", borderRadius: 10, paddingVertical: 8, paddingHorizontal: 12, borderWidth: 1, borderColor: "#2a2a2a", zIndex: 2 },
+  settingsButtonText: { color: "#aaa", fontWeight: "900", letterSpacing: 1, fontSize: 10 },
   logoMark: { width: 120, height: 120, borderRadius: 24, alignSelf: "center", marginBottom: 10, resizeMode: "contain" },
   subtitle: { color: "#aaa", fontSize: 14, marginBottom: 20, textAlign: "center" },
+  sectionLabel: { color: "#7FBF9A", fontWeight: "900", letterSpacing: 2, fontSize: 11, marginBottom: 6 },
+  sectionNote: { color: "#999", fontSize: 13, lineHeight: 18, marginBottom: 14 },
+  sectionHeading: { color: "#7FBF9A", fontWeight: "900", letterSpacing: 2, fontSize: 11, marginTop: 26, marginBottom: 10 },
+  addressCard: { width: "100%", maxWidth: 540, backgroundColor: "#111", borderRadius: 24, padding: 18, borderWidth: 1, borderColor: "#2a2a2a", marginTop: 14 },
+  addressRowTop: { flexDirection: "row", gap: 8 },
+  noTopMargin: { marginTop: 0 },
+  sketchButton: { marginTop: 10, marginBottom: 0 },
+  fullWidth: { alignSelf: "stretch" },
+  optionRowTop: { marginTop: 14 },
   tabRow: { flexDirection: "row", backgroundColor: "#111", borderRadius: 14, padding: 4, marginBottom: 18, borderWidth: 1, borderColor: "#2a2a2a" },
   tabButton: { paddingVertical: 10, paddingHorizontal: 22, borderRadius: 10 },
   tabButtonActive: { backgroundColor: "#2E4D3A" },
@@ -750,19 +666,24 @@ const styles = StyleSheet.create({
   buttonLight: { backgroundColor: "#2E4D3A", padding: 16, borderRadius: 16, alignItems: "center", marginTop: 16 },
   buttonLightText: { color: "#fff", fontWeight: "900", letterSpacing: 1 },
   input: { minHeight: 110, backgroundColor: "#050505", color: "#fff", borderRadius: 16, padding: 14, borderWidth: 1, borderColor: "#333", textAlignVertical: "top", fontSize: 15, lineHeight: 21 },
+  addressInput: { flex: 1, backgroundColor: "#050505", color: "#fff", borderRadius: 12, padding: 12, borderWidth: 1, borderColor: "#333", fontSize: 14 },
+  findButton: { backgroundColor: "#222", borderRadius: 12, paddingHorizontal: 18, alignItems: "center", justifyContent: "center" },
+  findButtonText: { color: "#fff", fontWeight: "900", letterSpacing: 1, fontSize: 12 },
+  siteStatus: { color: "#7FBF9A", fontSize: 12, marginTop: 8 },
+  keyBlock: { alignSelf: "stretch", marginBottom: 12 },
+  keyLabelRow: { flexDirection: "row", justifyContent: "space-between", marginBottom: 6 },
+  keyLabel: { color: "#aaa", fontWeight: "900", letterSpacing: 1, fontSize: 11 },
+  keyLink: { color: "#7FBF9A", fontSize: 12 },
+  linkRow: { flexDirection: "row", gap: 24 },
   preview: { width: "100%", height: 260, borderRadius: 18, resizeMode: "cover", marginBottom: 16 },
   result: { width: "100%", height: 480, borderRadius: 18, marginTop: 18, marginBottom: 16, resizeMode: "cover" },
-  thumbRow: { flexDirection: "row", flexWrap: "wrap", marginBottom: 16 },
-  thumb: { width: 80, height: 80, borderRadius: 10, marginRight: 8, marginBottom: 8 },
   message: { color: "#ddd", textAlign: "center", marginTop: 14 },
   disabled: { opacity: 0.6 },
   paywallOverlay: { flex: 1, backgroundColor: "rgba(0,0,0,0.88)", justifyContent: "center", alignItems: "center", padding: 24 },
   paywallCard: { width: "100%", maxWidth: 420, backgroundColor: "#111", borderRadius: 24, padding: 26, borderWidth: 1, borderColor: "#2a2a2a", alignItems: "center" },
   paywallTitle: { color: "#fff", fontSize: 24, fontWeight: "900", letterSpacing: 3, marginBottom: 6 },
-  paywallPrice: { color: "#fff", fontSize: 18, fontWeight: "700", marginBottom: 16 },
-  paywallBody: { color: "#aaa", fontSize: 14, textAlign: "center", marginBottom: 22, lineHeight: 20 },
+  paywallBody: { color: "#aaa", fontSize: 13, textAlign: "center", marginBottom: 18, lineHeight: 19 },
   paywallLink: { color: "#888", fontSize: 13, marginTop: 16, textAlign: "center" },
-  paywallSmall: { color: "#555", fontSize: 11, textAlign: "center", marginTop: 16, lineHeight: 16 },
   fullscreenContainer: { flex: 1, backgroundColor: "#000" },
   fullscreenScroll: { flex: 1 },
   fullscreenScrollContent: { flexGrow: 1, justifyContent: "center" },

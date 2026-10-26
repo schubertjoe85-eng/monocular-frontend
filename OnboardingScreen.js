@@ -1,5 +1,7 @@
-// OnboardingScreen.js — Monocular Build 130
-// First-launch screen: makes free-vs-Pro clearly discoverable (Guideline 2.1(b)).
+// OnboardingScreen.js — Monocular 1.1
+// First-launch screen: explains the two ways to render — on this phone (no
+// cost, nothing uploaded) and AI renders with the user's own OpenAI / Runway
+// keys. Shown again once to existing users, since 1.1 drops the subscription.
 // Restyled to match the main app: logo, #050505/#111 palette, green accent,
 // heavy letter-spaced button typography.
 
@@ -15,7 +17,7 @@ import {
 } from 'react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 
-const ONBOARDING_KEY = 'monocular_onboarding_seen_v1';
+const ONBOARDING_KEY = 'monocular_onboarding_seen_v2';
 
 // ---- Helpers (imported by App.js) -------------------------------------------
 
@@ -38,18 +40,18 @@ export async function markOnboardingSeen() {
 
 // ---- Component ---------------------------------------------------------------
 // Props:
-//   onTryFree()  — dismiss and go to the main screen (free render available)
-//   onSeePro()   — dismiss and open the subscription paywall
+//   onStart()    — dismiss and go to the main screen
+//   onAddKeys()  — dismiss and open Settings to add OpenAI / Runway keys
 
-export default function OnboardingScreen({ onTryFree, onSeePro }) {
-  const handleTryFree = async () => {
+export default function OnboardingScreen({ onStart, onAddKeys }) {
+  const handleStart = async () => {
     await markOnboardingSeen();
-    onTryFree();
+    onStart();
   };
 
-  const handleSeePro = async () => {
+  const handleAddKeys = async () => {
     await markOnboardingSeen();
-    onSeePro();
+    onAddKeys();
   };
 
   return (
@@ -62,27 +64,28 @@ export default function OnboardingScreen({ onTryFree, onSeePro }) {
         </View>
 
         <View style={styles.tiers}>
-          <View style={styles.card}>
-            <Text style={styles.tierLabel}>FREE</Text>
-            <Text style={styles.tierLine}>1 photorealistic render</Text>
-            <Text style={styles.tierSub}>No payment required</Text>
+          <View style={[styles.card, styles.cardPro]}>
+            <Text style={[styles.tierLabel, styles.tierLabelPro]}>ON THIS PHONE</Text>
+            <Text style={styles.tierLine}>Photoreal renders of your 3D model</Text>
+            <Text style={styles.tierLine}>Real sun for your site</Text>
+            <Text style={styles.tierSub}>.dae, .glb or .obj · nothing uploaded · no extra cost</Text>
           </View>
 
-          <View style={[styles.card, styles.cardPro]}>
-            <Text style={[styles.tierLabel, styles.tierLabelPro]}>PRO</Text>
-            <Text style={styles.tierLine}>Unlimited rendering</Text>
-            <Text style={styles.tierLine}>3D walkthrough videos</Text>
-            <Text style={styles.tierSub}>Auto-renewing subscription</Text>
+          <View style={styles.card}>
+            <Text style={styles.tierLabel}>AI RENDERS · YOUR OWN KEYS</Text>
+            <Text style={styles.tierLine}>Photo or capture → photoreal still</Text>
+            <Text style={styles.tierLine}>Walkthrough videos</Text>
+            <Text style={styles.tierSub}>Uses your OpenAI and Runway accounts — you pay them directly. Keys stay on this phone.</Text>
           </View>
         </View>
 
         <View style={styles.actions}>
-          <TouchableOpacity style={styles.buttonLight} onPress={handleTryFree} activeOpacity={0.85}>
-            <Text style={styles.buttonLightText}>TRY YOUR FREE RENDER</Text>
+          <TouchableOpacity style={styles.buttonLight} onPress={handleStart} activeOpacity={0.85}>
+            <Text style={styles.buttonLightText}>GET STARTED</Text>
           </TouchableOpacity>
 
-          <TouchableOpacity style={styles.buttonDark} onPress={handleSeePro} activeOpacity={0.85}>
-            <Text style={styles.buttonDarkText}>SEE PRO PLANS</Text>
+          <TouchableOpacity style={styles.buttonDark} onPress={handleAddKeys} activeOpacity={0.85}>
+            <Text style={styles.buttonDarkText}>ADD API KEYS</Text>
           </TouchableOpacity>
         </View>
       </View>

@@ -8,7 +8,8 @@
     "ios": "expo run:ios",
     "android": "expo run:android",
     "web": "expo export --platform web",
-    "export:web": "expo export --platform web"
+    "export:web": "expo export --platform web",
+    "build:local-render": "node local-render/build.mjs"
   },
   "dependencies": {
     "@fal-ai/client": "^1.10.1",
@@ -19,9 +20,12 @@
     "expo-document-picker": "~13.0.3",
     "expo-file-system": "~18.0.12",
     "expo-gl": "~15.0.5",
+    "expo-image-manipulator": "~13.0.6",
     "expo-image-picker": "~16.0.6",
     "expo-linking": "~7.0.5",
+    "expo-location": "~18.0.10",
     "expo-media-library": "~17.0.6",
+    "expo-secure-store": "~14.0.1",
     "expo-status-bar": "~2.0.1",
     "expo-three": "^8.0.0",
     "expo-updates": "~0.27.5",
@@ -29,14 +33,13 @@
     "react": "18.3.1",
     "react-dom": "18.3.1",
     "react-native": "0.76.9",
-    "react-native-iap": "12.15.6",
-    "react-native-purchases": "^10.4.0",
     "react-native-web": "~0.19.13",
     "react-native-webview": "13.12.5",
     "three": "^0.166.1"
   },
   "devDependencies": {
     "@types/react": "~18.3.12",
+    "esbuild": "^0.24.0",
     "typescript": "~5.8.3"
   }
 }

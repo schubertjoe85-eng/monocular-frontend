@@ -2,7 +2,7 @@
   "expo": {
     "name": "Monocular",
     "slug": "monocular",
-    "version": "1.0.4",
+    "version": "1.1.0",
     "icon": "./assets/icon.png",
     "userInterfaceStyle": "dark",
     "splash": {
@@ -20,14 +20,16 @@
     },
     "ios": {
       "bundleIdentifier": "com.schubertjoe.monocular",
-      "buildNumber": "132",
+      "buildNumber": "149",
       "supportsTablet": true,
       "infoPlist": {
         "ITSAppUsesNonExemptEncryption": false,
         "NSPhotoLibraryUsageDescription": "Monocular uses your photo library so you can select drawings, plans, or project images to create architectural-style renders.",
         "NSPhotoLibraryAddUsageDescription": "Monocular saves finished renders to your photo library so you can access and share them later.",
+        "NSLocationWhenInUseUsageDescription": "Monocular looks up the address you type to add real site context to your render. Your device's current location is never accessed.",
         "LSSupportsOpeningDocumentsInPlace": true,
-        "UIFileSharingEnabled": true
+        "UIFileSharingEnabled": true,
+        "NSCameraUsageDescription": "Monocular uses the camera to photograph your plan sketch, which it reads on this phone to build a 3D model."
       }
     },
     "android": {
@@ -43,8 +45,21 @@
       }
     },
     "plugins": [
-      "react-native-iap",
-      "expo-video"
+      "expo-video",
+      [
+        "expo-location",
+        {
+          "locationWhenInUsePermission": "Monocular looks up the address you type to add real site context to your render. Your device's current location is never accessed."
+        }
+      ],
+      "expo-secure-store",
+      [
+        "expo-image-picker",
+        {
+          "cameraPermission": "Monocular uses the camera to photograph your plan sketch, which it reads on this phone to build a 3D model.",
+          "photosPermission": "Monocular uses your photo library so you can select drawings, sketches, plans, or project images to render."
+        }
+      ]
     ],
     "runtimeVersion": {
       "policy": "appVersion"

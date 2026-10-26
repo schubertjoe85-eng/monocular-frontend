@@ -18,6 +18,15 @@
       "ios": {
         "image": "macos-sequoia-15.6-xcode-26.0"
       }
+    },
+    "screenshots": {
+      "distribution": "internal",
+      "ios": {
+        "simulator": true
+      },
+      "env": {
+        "EXPO_PUBLIC_SCREENSHOT_MODE": "1"
+      }
     }
   },
   "submit": {
