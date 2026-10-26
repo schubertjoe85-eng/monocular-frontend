@@ -1,28 +1,35 @@
 Monocular Privacy Policy
 
-Monocular collects the following information:
+This policy covers Monocular for iPhone and iPad, version 1.1 and later. Monocular has no accounts, no subscriptions and no Monocular server.
 
-- Images, 3D models, and prompts you submit, solely to generate AI-assisted architectural visualisations.
-- Your email address, if you create an account or purchase render credits.
-- A subscription identifier, if you subscribe via Apple's in-app purchase.
-- Basic usage and diagnostic information, to improve application performance and reliability.
+On-phone rendering
 
-To provide the service, this information is shared with the following processors, solely for the purpose of delivering your request:
+- 3D models you open for on-phone rendering are processed entirely on your device. They are never uploaded.
 
-- OpenAI, to generate photorealistic still images.
-- Runway, to generate video renders.
-- RevenueCat, to manage and verify Apple subscriptions.
-- Stripe, to process credit purchases.
-- Supabase, to store your account, credit balance, and render history.
+Site address
 
-Monocular does not sell your data to third parties, and does not use it for advertising or cross-app tracking.
+- If you type a site address and press Find, the address is looked up with Apple's own geocoding service, and the satellite images of the site are fetched from Apple Maps, under Apple's privacy policy. The site's coordinates (not the address) are also sent to OpenStreetMap's public Overpass service to get the outlines and heights of the surrounding buildings, and to Open-Meteo's public elevation service to get the shape of the terrain. Your device's current location is never accessed.
 
-You may request deletion of your account and associated data at any time by contacting us below.
+AI renders with your own API keys
 
-Users are responsible for ensuring they have the right to upload any images or models submitted to the service.
+- AI stills and videos are optional and use your own OpenAI and Runway accounts. The OpenAI and Runway API keys you enter are stored only in your device's Keychain. They are sent only to OpenAI or Runway, to authorise your own requests.
+- When you start an AI still, the image you chose and your description (plus the site address, if you found one) are sent directly from your device to OpenAI. When you start a video, the image and description are sent directly to Runway. Each provider handles that data under its own privacy policy and the terms of your account with them.
+- Monocular itself does not receive, store or see these images, descriptions, results or keys.
+
+Photos
+
+- Monocular reads images only when you pick them, and saves renders and videos to your Photos only when you tap Save.
+
+Monocular does not collect analytics or usage data, does not sell any data, and does not use data for advertising or cross-app tracking.
+
+Earlier versions (1.0.4 and before)
+
+Earlier versions sent images, 3D model captures and prompts to Monocular's render server, which used OpenAI, Runway and fal.ai to generate renders, and RevenueCat to manage Apple subscriptions. If you used an earlier version and want any associated data deleted, contact us below.
+
+Users are responsible for ensuring they have the right to use any images or models they render.
 
 If you have questions regarding privacy, contact:
 
 schubertjoe85@gmail.com
 
-Last Updated: September 2026
+Last Updated: October 2026
