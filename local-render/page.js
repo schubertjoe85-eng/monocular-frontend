@@ -224,7 +224,7 @@ function applyClay() {
   $("clayBtn").classList.toggle("on", clayOn);
 }
 // MOVE: drag the model across the site with one finger (orbit is paused while it's on), like desktop's Move tool.
-let moveOn = false, dragFrom = null;
+let moveOn = false, dragFrom = null, yLift = 0, moved = { x: 0, z: 0 };
 const groundPlane = new THREE.Plane(new THREE.Vector3(0, 1, 0), 0), ray = new THREE.Raycaster(), ndc = new THREE.Vector2();
 function groundPoint(e) {
   const r = renderer.domElement.getBoundingClientRect();
@@ -238,7 +238,8 @@ function setMove(on) {
   moveOn = !!on && !!modelRoot;
   controls.enabled = !moveOn;
   $("moveBtn").classList.toggle("on", moveOn);
-  if (moveOn) status("MOVE: drag the model to its place on the site. Tap MOVE again to orbit.");
+  $("nudgeRow").hidden = !moveOn;
+  if (moveOn) status("MOVE: drag the model to its place on the site, or move it exactly with X (east), Y (up) and Z (south). Tap MOVE again to orbit.");
   else status(siteStatus() || "");
 }
 function bindMove() {
@@ -255,6 +256,20 @@ function bindMove() {
   const end = () => { if (dragFrom) { dragFrom = null; placeModel(); applySun(); buildNeighbours(); } };
   c.addEventListener("pointerup", end); c.addEventListener("pointercancel", end);
 }
+
+// Exact moves along the site axes: x east, y up (on top of seating it on the ground), z south.
+const STEPS = [0.01, 0.1, 1, 10];
+let stepI = 1;
+function nudge(ax, sign) {
+  if (!modelRoot) return;
+  holdFrame = false;
+  const d = sign * STEPS[stepI];
+  if (ax === "y") yLift += d;
+  else { modelRoot.position[ax] += d; controls.target[ax] += d; camera.position[ax] += d; moved[ax] += d; }
+  placeModel(); applySun(); buildNeighbours();
+  status(`Moved x ${moved.x.toFixed(2)} m · y ${yLift.toFixed(2)} m · z ${moved.z.toFixed(2)} m`);
+}
+function stepLabel() { const v = STEPS[stepI]; $("stepBtn").textContent = "STEP " + (v < 1 ? Math.round(v * 1000) + " MM" : v + " M"); }
 
 // Rotates the model about the vertical, to face it correctly on the satellite site (the map is north-up).
 function spin(deg) {
@@ -361,7 +376,7 @@ function placeModel() {
   const b = new THREE.Box3().setFromObject(modelRoot);
   const pts = [[b.min.x, b.min.z], [b.max.x, b.min.z], [b.min.x, b.max.z], [b.max.x, b.max.z], [(b.min.x + b.max.x) / 2, (b.min.z + b.max.z) / 2]];
   const low = Math.min(...pts.map(([x, z]) => demAt(x, z)));
-  modelRoot.position.y = low - b.min.y; modelRoot.updateMatrixWorld(true);
+  modelRoot.position.y = low - b.min.y + yLift; modelRoot.updateMatrixWorld(true);
 }
 function clearSurroundings() {
   for (const k of Object.keys(ringTex)) { ringTex[k].dispose(); delete ringTex[k]; }
@@ -580,6 +595,7 @@ function buildFromSketch(vision, name) {
   const r = Builder.interpretSketch(vision, cur, { level: 0 });
   if (r.error) { status("Couldn't build from the sketch: " + r.error); post({ type: "sketchRead", error: r.error }); return; }
   sketchParams = { ...cur, ...r.params };
+  yLift = 0; moved = { x: 0, z: 0 };
   sketchParams.roofPitchDeg = PITCH[sketchParams.roofType] ?? sketchParams.roofPitchDeg;
   setModel(Builder.buildModel(sketchParams));
   $("renderBtn").disabled = false; $("captureBtn").disabled = false;
@@ -640,6 +656,9 @@ function bindUi() {
   $("turnBtn").onclick = () => turn(-1);
   $("spinBtn").onclick = () => spin(-45);
   $("moveBtn").onclick = () => setMove(!moveOn);
+  for (const ax of ["x", "y", "z"]) { $(ax + "Down").onclick = () => nudge(ax, -1); $(ax + "Up").onclick = () => nudge(ax, 1); }
+  $("stepBtn").onclick = () => { stepI = (stepI + 1) % STEPS.length; stepLabel(); };
+  stepLabel();
   bindMove();
   $("renderBtn").onclick = renderPhoto;
   $("captureBtn").onclick = captureView;
@@ -735,7 +754,7 @@ window.__mono = {
     try { buildFromSketch(JSON.parse(parts.join("")), name || "the sketch"); }
     catch (e) { status("Couldn't build from the sketch: " + (e && e.message)); post({ type: "sketchRead", error: String(e && e.message || e) }); }
   },
-  modelBegin(name) { sketchParams = null; $("editRow").hidden = true; incoming = { name, parts: [] }; status("Loading " + name + "…"); },
+  modelBegin(name) { sketchParams = null; yLift = 0; moved = { x: 0, z: 0 }; $("editRow").hidden = true; incoming = { name, parts: [] }; status("Loading " + name + "…"); },
   modelChunk(part) { if (incoming) incoming.parts.push(part); },
   async modelEnd() {
     const job = incoming; incoming = null;
