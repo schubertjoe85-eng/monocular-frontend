@@ -239,7 +239,8 @@ function rectOf(outer, holes){
   const E = edges(outer, false);
   if (E.length !== 4 || E.some((e, i) => Math.abs(e.e[0] * E[(i + 1) % 4].e[0] + e.e[1] * E[(i + 1) % 4].e[1]) > 0.03)) return null;
   const cx = outer.reduce((s, q) => s + q[0], 0) / 4, cz = outer.reduce((s, q) => s + q[1], 0) / 4;
-  return { cx, cz, e: E[0].e, w: E[0].L, d: E[1].L };
+  // the long side first: roofs that run along the building (a hip's ridge) take e as their direction
+  return E[0].L >= E[1].L ? { cx, cz, e: E[0].e, w: E[0].L, d: E[1].L } : { cx, cz, e: E[1].e, w: E[1].L, d: E[0].L };
 }
 // The building as blocks: one for a parametric plan, or one per traced outline for a sketch. A block sitting on
 // another starts at its parent's roof.
@@ -362,7 +363,8 @@ export function buildModel(raw){
     } else if (rs && rs.outline && roofType !== "flat") {
       const r = b.rect, en = [-r.e[1], r.e[0]], ext = (d, c) => { const v = rs.outline.map(q => (q[0] - r.cx) * d[0] + (q[1] - r.cz) * d[1]); return (Math.max(...v) - Math.min(...v)) / 2 - c / 2; };
       const oE = Math.max(0, ext(r.e, r.w)), oN = Math.max(0, ext(en, r.d));
-      const along = rs.ridge ? Math.abs(rs.ridge[0] * r.e[0] + rs.ridge[1] * r.e[1]) > 0.7 : r.w >= r.d;
+      // a hip's ridge always runs the long way; a gable's follows a ridge line drawn on the plan
+      const along = rs.ridge && roofType !== "hip" ? Math.abs(rs.ridge[0] * r.e[0] + rs.ridge[1] * r.e[1]) > 0.7 : r.w >= r.d;
       const g = ([x, z]) => [r.cx + x * r.e[0] - z * r.e[1], r.cz + x * r.e[1] + z * r.e[0]];
       pitchedRoof(acc, { ...p, roofType, width: r.w, depth: r.d, along, overhangA: along ? oE : oN, overhangB: along ? oN : oE }, g, 1, top);
     } else if (rs && rs.outline) {
@@ -1502,7 +1504,7 @@ export function applyElevation(p, e){
     out.sketch = { ...p.sketch, blocks: sk.map(b => ({
       ...b,
       ...(mains.length === 1 && b === mains[0] && e.storeys ? { storeys: e.storeys } : {}),
-      ...(b.roof && e.roofType ? { roof: { ...b.roof, type: null } } : {}),
+      ...(b.roof && e.roofType ? { roof: { ...b.roof, type: null, ridge: null } } : {}),
     })) };
   }
   return out;

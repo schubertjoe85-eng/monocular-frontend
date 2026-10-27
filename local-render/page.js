@@ -643,7 +643,7 @@ function cycleWindows() { rebuildSketch({ windowType: Builder.cycleWindows(sketc
 function cycleRoof() {
   const T = Builder.ROOF_TYPES, next = T[(T.indexOf(sketchParams.roofType) + 1) % T.length];
   // the chosen roof replaces any roof read off the drawing
-  rebuildSketch({ roofType: next, roofPitchDeg: PITCH[next] ?? sketchParams.roofPitchDeg, sketch: { ...sketchParams.sketch, blocks: sketchParams.sketch.blocks.map(b => b.roof ? { ...b, roof: { ...b.roof, type: null } } : b) } });
+  rebuildSketch({ roofType: next, roofPitchDeg: PITCH[next] ?? sketchParams.roofPitchDeg, sketch: { ...sketchParams.sketch, blocks: sketchParams.sketch.blocks.map(b => b.roof ? { ...b, roof: { ...b.roof, type: null, ridge: null } } : b) } });
 }
 function stepStoreys(d) {
   const n = Math.max(1, Math.min(60, mainStoreys(sketchParams) + d));
