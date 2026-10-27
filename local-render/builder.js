@@ -233,7 +233,9 @@ function pitchedRoof(acc, p, f, s, y0){
 
 // A rectangle (4 square corners, no holes) gets its centre, direction and sides, so a pitched roof can sit on it.
 function rectOf(outer, holes){
-  if (outer.length !== 4 || (holes && holes.length)) return null;
+  if (holes && holes.length) return null;
+  if (outer.length > 4) outer = dropStraight(outer, 0.15);   // a wall split where it changes from solid to glass is still one side
+  if (outer.length !== 4) return null;
   const E = edges(outer, false);
   if (E.length !== 4 || E.some((e, i) => Math.abs(e.e[0] * E[(i + 1) % 4].e[0] + e.e[1] * E[(i + 1) % 4].e[1]) > 0.03)) return null;
   const cx = outer.reduce((s, q) => s + q[0], 0) / 4, cz = outer.reduce((s, q) => s + q[1], 0) / 4;
@@ -1011,7 +1013,8 @@ function squareUp(q, tol){
 
 const T_VOID = /\b(void|court(yard)?|open(\s*to\s*sky)?|atrium|light\s*well|lightwell|garden|yard|lawn|pool|cy)\b/i;
 function readLabel(s){
-  const t = String(s).toLowerCase().replace(/,/g, ".").replace(/[–—]/g, "-").trim(), r = {};
+  const t = String(s).toLowerCase().replace(/,/g, ".").replace(/[–—]/g, "-").trim()
+    .replace(/(^|\s)[il|](?=\s*(?:st|sty|storeys?|stor(?:ie|y)s?|stories|floors?|levels?)\b)/, "$11"), r = {};   // a handwritten "1" read as "I"
   if (T_VOID.test(t)) r.void = true;
   let m;
   if ((m = t.match(/(?:split|up|raised|lift)?\s*\+\s*(\d+(?:\.\d+)?)\s*m\b/))) r.lift = parseFloat(m[1]);
@@ -1023,6 +1026,47 @@ function readLabel(s){
   else if ((m = t.match(/^(\d+(?:\.\d+)?)\s*(mm|m|metres?|meters?)$/))) r.length = parseFloat(m[1]) / (m[2] === "mm" ? 1000 : 1);
   else if ((m = t.match(/^(\d+(?:\.\d+)?)$/))) { const v = parseFloat(m[1]); if (v >= 1000) r.length = v / 1000; else r.bare = v; }
   return r;
+}
+
+// The outer envelope of traced ink: each row and column of a fine grid spans from its first ink to its last, and the
+// building is where a row's span and a column's span overlap (exact for rectangles, L-shapes and steps).
+function inkEnvelope(q, cell){
+  const xs = q.map(p => p[0]), ys = q.map(p => p[1]), x0 = Math.min(...xs), y0 = Math.min(...ys);
+  const nx = Math.ceil((Math.max(...xs) - x0) / cell) + 1, ny = Math.ceil((Math.max(...ys) - y0) / cell) + 1;
+  const ink = new Uint8Array(nx * ny);
+  for (let i = 0; i < q.length; i++) {
+    const A = q[i], B = q[(i + 1) % q.length], n = Math.ceil(Math.hypot(B[0] - A[0], B[1] - A[1]) / (cell * 0.5)) + 1;
+    for (let j = 0; j <= n; j++) ink[Math.round((A[1] + (B[1] - A[1]) * j / n - y0) / cell) * nx + Math.round((A[0] + (B[0] - A[0]) * j / n - x0) / cell)] = 1;
+  }
+  const rMin = Array(ny).fill(Infinity), rMax = Array(ny).fill(-1), cMin = Array(nx).fill(Infinity), cMax = Array(nx).fill(-1);
+  for (let r = 0; r < ny; r++) for (let c = 0; c < nx; c++) if (ink[r * nx + c]) { rMin[r] = Math.min(rMin[r], c); rMax[r] = Math.max(rMax[r], c); cMin[c] = Math.min(cMin[c], r); cMax[c] = Math.max(cMax[c], r); }
+  const span = [];
+  for (let r = 0; r < ny; r++) {
+    let a = -1, b = -1;
+    for (let c = rMin[r]; c <= rMax[r]; c++) if (cMin[c] <= r && r <= cMax[c]) { if (a < 0) a = c; b = c; }
+    span.push(a < 0 ? null : [a, b]);
+  }
+  // a short break in a wall line leaves a slit: each row takes the widest span of the rows just around it
+  const w = 4, left = [], right = [];
+  for (let r = 0; r < ny; r++) {
+    if (!span[r]) continue;
+    let a = span[r][0], b = span[r][1];
+    for (let k = Math.max(0, r - w); k <= Math.min(ny - 1, r + w); k++) if (span[k]) { a = Math.min(a, span[k][0]); b = Math.max(b, span[k][1]); }
+    left.push([x0 + a * cell, y0 + r * cell], [x0 + a * cell, y0 + (r + 1) * cell]);
+    right.push([x0 + (b + 1) * cell, y0 + r * cell], [x0 + (b + 1) * cell, y0 + (r + 1) * cell]);
+  }
+  if (left.length < 4) return null;
+  return dpSimplify([...left, ...right.reverse()], cell * 2);
+}
+
+// A roof written in a note. Handwriting comes back rough ("SkillIDn roof"), so it's matched loosely.
+function roofFromNote(text){
+  const t = String(text).toLowerCase().replace(/[|!1]/g, "l").replace(/0/g, "o");
+  if (/\bhip(ped)?\b/.test(t)) return "hip";
+  if (/\bgab|\bpitched\b/.test(t)) return "gable";
+  if (/\bsk[il\/]{1,4}|\bmono|lean[- ]?to|\bshed roof|single[- ]?pitch/.test(t)) return "mono";
+  if (/\bflat\b/.test(t)) return "flat";
+  return null;
 }
 
 /** Turn Vision's reading of a sketch into builder params: { params, read, assumed, overlay } or { error }. */
@@ -1044,11 +1088,23 @@ export function interpretSketch(vision, current = {}, opts = {}){
     const gap = Math.max(big * 0.03, 0.3 * Math.sqrt(Y.A));
     const X = cs.find(X => !used.has(X) && X.A < Y.A && X.bb[0] >= Y.bb[0] && X.bb[1] >= Y.bb[1] && X.bb[2] <= Y.bb[2] && X.bb[3] <= Y.bb[3]
       && Math.sqrt(Y.A) - Math.sqrt(X.A) < gap && insidePoly(Y.q, X.q[0]));
-    if (X) {
+    if (X && perim(X.q) > 1.4 * perim(Y.q)) {
+      // rooms drawn inside: the inside edge weaves in and out round the internal walls, so the building is the outside edge
+      used.add(X);
+      const q = dpSimplify(Y.q, big * 0.003);
+      shapes.push({ q, A: Math.abs(shoelace(q)), th: big * 0.006, rooms: true });
+    }
+    else if (X) {
       // the inside edge of the drawn line, moved out to the middle of the line (half its measured thickness)
       used.add(X);
       const th = (Y.A - X.A) / ((perim(Y.q) + perim(X.q)) / 2), q = offsetLoop(dpSimplify(X.q, big * 0.003), th / 2, false);   // simplify first: widening a noisy trace makes spurs
       shapes.push({ q, A: Math.abs(shoelace(q)), th });
+    }
+    else if (Math.min(Y.bb[2] - Y.bb[0], Y.bb[3] - Y.bb[1]) > big * 0.12 && perim(Y.q) > 1.8 * 2 * (Y.bb[2] - Y.bb[0] + Y.bb[3] - Y.bb[1])) {
+      // a plan with rooms drawn in and a gap somewhere in the outside wall: the ink never closes round a space,
+      // so what's traced is the lines themselves. The building is their outer envelope.
+      const q = inkEnvelope(Y.q, big * 0.004);
+      if (q) shapes.push({ q, A: Math.abs(shoelace(q)), th: big * 0.006, rooms: true });
     }
     else if (2 * Y.A / perim(Y.q) > big * 0.012) shapes.push({ q: Y.q, A: Y.A, solid: true });
   }
@@ -1069,6 +1125,11 @@ export function interpretSketch(vision, current = {}, opts = {}){
     if (t.r.length != null || (t.r.bare != null && !holder && t.r.bare >= 3)) dims.push({ ...t, m: t.r.length ?? t.r.bare });
     else if (holder) holder.labels.push(t);
   }
+  // Notes beside the drawing, outside every outline ("1 storey", "skillion roof"), are for the whole building.
+  const loose = texts.filter(t => !shapes.some(s => insidePoly(s.q, t.c)) && t.r.length == null);
+  const noteRoof = roofFromNote(loose.map(t => t.s).join(" ")), noteStoreys = loose.map(t => t.r.storeys).find(v => v != null) ?? null;
+  const noteWords = loose.filter(t => t.r.storeys != null).map(t => `“${t.s.trim()}”`).join(" ");
+  if (noteRoof) read.push(`“${loose.find(t => roofFromNote(t.s)).s.trim()}” as ${noteRoof === "mono" ? "a skillion (mono-pitch)" : noteRoof === "hip" ? "a hip" : noteRoof === "gable" ? "a gable" : "a flat"} roof`);
 
   // scale: each length matched to the nearest roughly parallel edge it sits beside
   const scales = [];
@@ -1097,13 +1158,19 @@ export function interpretSketch(vision, current = {}, opts = {}){
   for (const s of shapes.slice().sort((a, b) => depthOf(a) - depthOf(b) || b.A - a.A)) {
     const lab = Object.assign({}, ...s.labels.map(t => t.r)), words = s.labels.map(t => `“${t.s.trim()}”`).join(" ");
     let st = lab.storeys ?? lab.bare ?? (lab.height != null ? Math.max(1, Math.round(lab.height / hs)) : null);
+    if (st == null && !s.parent && noteStoreys != null) { st = noteStoreys; read.push(`${noteWords} beside the drawing as ${st} storey${st > 1 ? "s" : ""} for block ${blocks.length + 1}`); }
     const pb = s.parent && bySh.get(s.parent);
+    let anc = s.parent; while (anc && !anc.rooms) anc = anc.parent;
+    if (anc && !lab.void && st == null && lab.addStoreys == null) {   // a room drawn inside a building, not a courtyard
+      if (!read.some(r => r.startsWith("rooms drawn inside"))) read.push(`rooms drawn inside block ${blocks.indexOf(bySh.get(anc)) + 1}, so it's the outside walls that make the building`);
+      continue;
+    }
     if (s.parent && (lab.void || (st == null && lab.addStoreys == null) || !pb)) {
       const host = pb || bySh.get(s.parent.parent);
       if (host) { host.holesPx.push(s.q); if (!lab.void) assumed.push(`the empty outline inside block ${blocks.indexOf(host) + 1} is a courtyard (write a number in it to make it a block on top)`); else read.push(`${words} as a courtyard`); }
       continue;
     }
-    const b = { px: s.q, holesPx: [], parent: pb ? blocks.indexOf(pb) : null, storeys: null, th: s.th || big * 0.006 };
+    const b = { px: s.q, holesPx: [], parent: pb ? blocks.indexOf(pb) : null, storeys: null, th: s.th || big * 0.006, rooms: !!s.rooms };
     if (pb) {
       const below = pb.storeys ?? current.storeys ?? DEFAULTS.storeys;
       if (lab.addStoreys != null) b.storeys = lab.addStoreys;
@@ -1156,7 +1223,26 @@ export function interpretSketch(vision, current = {}, opts = {}){
     const c = clean(q), xs = c.map(v => v[0]), zs = c.map(v => v[1]), x0 = Math.min(...xs), x1 = Math.max(...xs), z0 = Math.min(...zs), z1 = Math.max(...zs);
     return Math.abs(shoelace(c)) > 0.85 * (x1 - x0) * (z1 - z0) ? [[x0, z0], [x1, z0], [x1, z1], [x0, z1]] : c;
   };
-  for (const b of blocks) { b.outer = clean(b.px); b.holes = b.holesPx.map(clean); }
+  // A plan read from its rooms' outer envelope picks up pen overshoots at the corners. When it's nearly a rectangle,
+  // each side goes where most of its length runs.
+  const snapRect = q => {
+    const E = q.map((A, i) => [A, q[(i + 1) % q.length]]), xs = q.map(v => v[0]), zs = q.map(v => v[1]);
+    const mx = (Math.min(...xs) + Math.max(...xs)) / 2, mz = (Math.min(...zs) + Math.max(...zs)) / 2;
+    const side = (vert, lo) => {
+      const w = new Map();
+      for (const [A, B] of E) {
+        if (vert ? Math.abs(A[0] - B[0]) > 1e-6 : Math.abs(A[1] - B[1]) > 1e-6) continue;
+        const c = vert ? A[0] : A[1];
+        if (lo ? c < (vert ? mx : mz) : c > (vert ? mx : mz)) w.set(c, (w.get(c) || 0) + Math.abs(vert ? B[1] - A[1] : B[0] - A[0]));
+      }
+      return w.size ? [...w].sort((a, b) => b[1] - a[1])[0][0] : null;
+    };
+    const x0 = side(true, true), x1 = side(true, false), z0 = side(false, true), z1 = side(false, false);
+    if ([x0, x1, z0, z1].some(v => v == null)) return q;
+    const R = [[x0, z0], [x1, z0], [x1, z1], [x0, z1]];
+    return Math.abs(Math.abs(shoelace(q)) - (x1 - x0) * (z1 - z0)) < 0.1 * (x1 - x0) * (z1 - z0) ? R : q;
+  };
+  for (const b of blocks) { b.outer = b.rooms ? snapRect(clean(b.px)) : clean(b.px); b.holes = b.holesPx.map(clean); }
   // line weight: bold = solid wall, thin = glazing. Where a drawing uses both, each wall (or the part of it drawn
   // that way) gets its own: edges are split where the weight changes.
   const BM = vision.bold && vision.bold.data ? (() => { const bin = atob(vision.bold.data), a = new Uint8Array(bin.length); for (let i = 0; i < bin.length; i++) a[i] = bin.charCodeAt(i); return { ...vision.bold, a }; })() : null;
@@ -1251,15 +1337,16 @@ export function interpretSketch(vision, current = {}, opts = {}){
     if (byDir.h > span * 0.45 || byDir.v > span * 0.45) ridge = byDir.h >= byDir.v ? [1, 0] : [0, 1];
     diag = diag > span * 0.5 ? 2 : 0;
     const nf = facets.filter(f => insidePoly(poly, f.c)).length;
-    const type = diag >= 2 || nf >= 3 ? "hip" : ridge || nf === 2 ? "gable" : null;
     const words = (vision.texts || []).filter(t => insidePoly(poly, [t.box[0] + t.box[2] / 2, t.box[1] + t.box[3] / 2])).map(t => t.s.toLowerCase()).join(" ");
+    // a roof written in words beats one guessed from the lines drawn
+    const type = roofFromNote(words) || noteRoof || (diag >= 2 || nf >= 3 ? "hip" : ridge || nf === 2 ? "gable" : null);
     roofOverlay.push(poly);
     const hi = blocks.indexOf(host) + 1, outline = clean(poly), rm = ridge ? [ridge[0] * ct - ridge[1] * st_, ridge[0] * st_ + ridge[1] * ct] : null;
     const saysRoof = /roof|eave|canopy|awning/.test(words), floorsM = words.match(/(\d{1,3})\s*(?:st|storeys?|stories|floors?|levels?|lvls?)\b|\bl(?:evel)?\s*(\d{1,3})/);
     const upper = (opts.level || 0) > 0;   // a plan of an upper floor: dashes round it are its roof
     if (type || saysRoof || (!floorsM && (upper || (host.storeys != null && host.storeys <= 1 && false)))) {
       host.roof = { outline, type, ridge: rm };
-      read.push(`dashed outline over block ${hi} as its roof` + (type ? ` (${type}${type === "gable" && !nf ? ", from the ridge line" : ""})` : ", no ridge drawn, so the Roof setting decides its shape"));
+      read.push(`dashed outline over block ${hi} as its roof` + (type ? ` (${type === "mono" ? "skillion" : type}${type === "gable" && !nf && !noteRoof ? ", from the ridge line" : ""})` : ", no ridge drawn, so the Roof setting decides its shape"));
     } else {
       // floors above: the dashed outline from level 1 up (or as many storeys as written in it), the solid one below
       const below = host.storeys ?? 1, up = floorsM && floorsM[1] ? +floorsM[1] : 1;
@@ -1285,7 +1372,7 @@ export function interpretSketch(vision, current = {}, opts = {}){
   if (blocks.some(b => b.holes.length)) read.push(`${blocks.reduce((s, b) => s + b.holes.length, 0)} courtyard${blocks.reduce((s, b) => s + b.holes.length, 0) > 1 ? "s" : ""}`);
   read.push(`overall ${widthOut.toFixed(1)} m × ${(d0 * widthOut / w0).toFixed(1)} m`);
   const overlay = blocks.map((b, i) => ({ pts: b.px, holes: b.holesPx, label: `${i + 1}` }));
-  return { params: { shape: "sketch", sketch: sk, width: widthOut, depth: d0 * widthOut / w0, facades }, read, assumed, overlay, roofOverlay, blocksPx: blocks.map(b => b.px), image: { w: W, h: H } };
+  return { params: { shape: "sketch", sketch: sk, width: widthOut, depth: d0 * widthOut / w0, facades, ...(noteRoof ? { roofType: noteRoof } : {}) }, read, assumed, overlay, roofOverlay, blocksPx: blocks.map(b => b.px), image: { w: W, h: H } };
 }
 
 /* ---------------- Interior: internal walls, doors, openings, stairs, cores, columns ----------------

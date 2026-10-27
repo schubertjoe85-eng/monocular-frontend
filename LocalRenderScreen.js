@@ -13,7 +13,7 @@
 //   RN -> page: window.__mono.setSite / modelBegin / modelChunk / modelEnd
 
 import React, { useRef, useState } from "react";
-import { View, Text, TextInput, TouchableOpacity, ActivityIndicator, ActionSheetIOS, Alert, Platform, StyleSheet } from "react-native";
+import { View, Text, TextInput, TouchableOpacity, ActivityIndicator, Image, Modal, ScrollView, StyleSheet } from "react-native";
 import * as ImagePicker from "expo-image-picker";
 import { readSketch } from "./modules/monocular-site";
 import { WebView } from "react-native-webview";
@@ -35,6 +35,7 @@ export default function LocalRenderScreen({ site, address = "", onSiteFound, onR
   const [error, setError] = useState("");
   const [addr, setAddr] = useState(address);
   const [finding, setFinding] = useState(false);
+  const [sketchHelp, setSketchHelp] = useState(false);
 
   const inject = js => webRef.current && webRef.current.injectJavaScript(js + "\ntrue;");
 
@@ -121,21 +122,9 @@ export default function LocalRenderScreen({ site, address = "", onSiteFound, onR
       setError("Couldn't get the sketch photo: " + (e.message || e));
     }
   }
-  function pickSketch() {
-    const tips = "Draw each building as a closed shape in dark pen on plain paper: bold lines for walls, thin lines for glass, a dashed outline for upper floors that overhang. Write the storeys inside each shape and one length beside an edge (e.g. 24m). Photograph it straight on.";
-    if (Platform.OS === "ios") {
-      ActionSheetIOS.showActionSheetWithOptions(
-        { options: ["Photograph a sketch", "Choose a sketch photo", "Cancel"], cancelButtonIndex: 2, title: "Build from a sketch", message: tips },
-        i => { if (i === 0) photographSketch(true); else if (i === 1) photographSketch(false); }
-      );
-    } else {
-      Alert.alert("Build from a sketch", tips, [
-        { text: "Photograph", onPress: () => photographSketch(true) },
-        { text: "Choose photo", onPress: () => photographSketch(false) },
-        { text: "Cancel", style: "cancel" },
-      ]);
-    }
-  }
+  // The how-to-draw guide (an example sketch with what each mark means), then the camera or the photo library.
+  function pickSketch() { setSketchHelp(true); }
+  function sketchFrom(useCamera) { setSketchHelp(false); setTimeout(() => photographSketch(useCamera), 350); }
 
   async function pickModel() {
     setError("");
@@ -216,6 +205,32 @@ export default function LocalRenderScreen({ site, address = "", onSiteFound, onR
         </TouchableOpacity>
       </View>
       {!!error && <Text style={styles.error}>{error}</Text>}
+      <Modal visible={sketchHelp} animationType="slide" presentationStyle="pageSheet" onRequestClose={() => setSketchHelp(false)}>
+        <View style={styles.helpWrap}>
+          <ScrollView contentContainerStyle={styles.helpBody}>
+            <Text style={styles.helpTitle}>BUILD FROM A SKETCH</Text>
+            <Text style={styles.helpText}>Draw the plan from above, like this, then photograph it. It's read on this phone.</Text>
+            <Image source={require("./assets/images/sketch-guide.jpg")} style={styles.helpImage} resizeMode="contain" />
+            {[
+              ["Outline", "Each building is one closed shape. Separate buildings, separate shapes."],
+              ["Walls & glass", "Thick line = solid wall. Thin line = glass."],
+              ["Storeys", "Write them inside the shape: 2, 2 st, L3."],
+              ["Size", "Write one length beside an edge: 24m."],
+              ["Roof", "Write it beside the drawing: skillion roof, gable, hip or flat. A dashed line around a shape is its roof edge."],
+              ["Courtyard", "A shape inside another that's empty or says court."],
+              ["Photo", "Dark pen on plain paper. Straight on, whole page in view. Keep words off the lines."],
+            ].map(([h, t]) => (
+              <Text key={h} style={styles.helpText}><Text style={styles.helpHead}>{h}  </Text>{t}</Text>
+            ))}
+            <Text style={styles.helpNote}>After it's built you can change the storeys, roof, size and windows with the buttons under the model.</Text>
+          </ScrollView>
+          <View style={styles.helpButtons}>
+            <TouchableOpacity style={styles.helpPrimary} onPress={() => sketchFrom(true)}><Text style={styles.closeText}>PHOTOGRAPH A SKETCH</Text></TouchableOpacity>
+            <TouchableOpacity style={styles.helpSecondary} onPress={() => sketchFrom(false)}><Text style={styles.closeText}>CHOOSE A PHOTO</Text></TouchableOpacity>
+            <TouchableOpacity style={styles.helpCancel} onPress={() => setSketchHelp(false)}><Text style={styles.helpCancelText}>Cancel</Text></TouchableOpacity>
+          </View>
+        </View>
+      </Modal>
       <WebView
         ref={webRef}
         style={styles.web}
@@ -251,4 +266,16 @@ const styles = StyleSheet.create({
   disabled: { opacity: 0.6 },
   error: { color: "#ff8a80", fontSize: 12, paddingHorizontal: 14, paddingVertical: 6, backgroundColor: "#0b0b0b" },
   web: { flex: 1, backgroundColor: "#111" },
+  helpWrap: { flex: 1, backgroundColor: "#0b0b0b" },
+  helpBody: { padding: 20, paddingBottom: 12 },
+  helpTitle: { color: "#fff", fontSize: 15, fontWeight: "800", letterSpacing: 1, marginBottom: 6 },
+  helpText: { color: "#d6d6d6", fontSize: 14, lineHeight: 20, marginTop: 8 },
+  helpHead: { color: "#7FBF9A", fontWeight: "800" },
+  helpNote: { color: "#9a9a9a", fontSize: 13, lineHeight: 18, marginTop: 14 },
+  helpImage: { width: "100%", aspectRatio: 1400 / 1016, borderRadius: 10, marginTop: 12, backgroundColor: "#faf9f4" },
+  helpButtons: { padding: 16, paddingBottom: 30, borderTopWidth: 1, borderTopColor: "#262626", gap: 10 },
+  helpPrimary: { backgroundColor: "#2E4D3A", borderRadius: 12, paddingVertical: 15, alignItems: "center" },
+  helpSecondary: { backgroundColor: "#222", borderColor: "#333", borderWidth: 1, borderRadius: 12, paddingVertical: 15, alignItems: "center" },
+  helpCancel: { paddingVertical: 8, alignItems: "center" },
+  helpCancelText: { color: "#9a9a9a", fontSize: 14 },
 });

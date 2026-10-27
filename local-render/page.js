@@ -580,23 +580,52 @@ function buildFromSketch(vision, name) {
   const r = Builder.interpretSketch(vision, cur, { level: 0 });
   if (r.error) { status("Couldn't build from the sketch: " + r.error); post({ type: "sketchRead", error: r.error }); return; }
   sketchParams = { ...cur, ...r.params };
+  sketchParams.roofPitchDeg = PITCH[sketchParams.roofType] ?? sketchParams.roofPitchDeg;
   setModel(Builder.buildModel(sketchParams));
   $("renderBtn").disabled = false; $("captureBtn").disabled = false;
-  $("winBtn").hidden = false; $("winBtn").textContent = WINDOW_LABEL[sketchParams.windowType] + " WINDOWS";
+  $("editRow").hidden = false; showSketchValues();
   const h = Builder.totalHeight(sketchParams);
-  status(`Built from ${name}: ` + r.read.join("; ") + `; ${h.toFixed(1)} m high.` + (r.assumed.length ? " Assumed: " + r.assumed.join("; ") + "." : ""));
+  // the reader's notes are worded for desktop's panel: here the − / + buttons under the model do that job
+  const phone = t => t.replace(/: click the width on the model to set the real size/, ": use SIZE − / + to set the real width").replace(/uses the Storeys field/, "has " + mainStoreys(sketchParams) + " (change it with − / +)");
+  status(`Built from ${name}: ` + r.read.join("; ") + `; ${h.toFixed(1)} m high.` + (r.assumed.length ? " Assumed: " + r.assumed.map(phone).join("; ") + "." : ""));
   post({ type: "sketchRead", read: r.read, assumed: r.assumed, height: h });
 }
-// WINDOWS: the builder's Windows setting for the walls the sketch doesn't mark as glass or solid
-function cycleWindows() {
+const PITCH = { mono: 10, gable: 25, hip: 25 };   // a skillion is a low roof; 25° makes it a tall wall
+const ROOF_LABEL = { flat: "FLAT ROOF", gable: "GABLE ROOF", hip: "HIP ROOF", mono: "SKILLION ROOF" };
+// the storeys of the main (ground) blocks: what the − / + buttons change
+const mainStoreys = p => Math.max(1, ...p.sketch.blocks.filter(b => b.parent == null).map(b => b.storeys ?? p.storeys));
+function showSketchValues() {
+  $("winBtn").textContent = WINDOW_LABEL[sketchParams.windowType] + " WINDOWS";
+  $("roofBtn").textContent = ROOF_LABEL[sketchParams.roofType] || "FLAT ROOF";
+  $("stVal").textContent = mainStoreys(sketchParams) + " ST";
+  $("szVal").textContent = Math.round(sketchParams.width) + " M";
+}
+// Rebuild the sketch model after a change, keeping where it sits on the site and the view.
+function rebuildSketch(changes) {
   if (!sketchParams || !modelRoot) return;
   const keepPos = modelRoot.position.clone(), keepRot = modelRoot.rotation.y;
-  sketchParams = { ...sketchParams, windowType: Builder.cycleWindows(sketchParams.windowType) };
+  sketchParams = { ...sketchParams, ...changes };
   const cam = camera.position.clone(), tgt = controls.target.clone();
   setModel(Builder.buildModel(sketchParams));
   modelRoot.position.copy(keepPos); modelRoot.rotation.y = keepRot; placeModel();
   camera.position.copy(cam); controls.target.copy(tgt); controls.update(); applySun(); buildNeighbours();
-  $("winBtn").textContent = WINDOW_LABEL[sketchParams.windowType] + " WINDOWS";
+  showSketchValues();
+  status(`${sketchParams.width.toFixed(1)} m × ${sketchParams.depth.toFixed(1)} m, ${mainStoreys(sketchParams)} storey${mainStoreys(sketchParams) > 1 ? "s" : ""}, ${(ROOF_LABEL[sketchParams.roofType] || "").toLowerCase()}, ${Builder.totalHeight(sketchParams).toFixed(1)} m high.`);
+}
+// WINDOWS: the builder's Windows setting for the walls the sketch doesn't mark as glass or solid
+function cycleWindows() { rebuildSketch({ windowType: Builder.cycleWindows(sketchParams.windowType) }); }
+function cycleRoof() {
+  const T = Builder.ROOF_TYPES, next = T[(T.indexOf(sketchParams.roofType) + 1) % T.length];
+  // the chosen roof replaces any roof read off the drawing
+  rebuildSketch({ roofType: next, roofPitchDeg: PITCH[next] ?? sketchParams.roofPitchDeg, sketch: { ...sketchParams.sketch, blocks: sketchParams.sketch.blocks.map(b => b.roof ? { ...b, roof: { ...b.roof, type: null } } : b) } });
+}
+function stepStoreys(d) {
+  const n = Math.max(1, Math.min(60, mainStoreys(sketchParams) + d));
+  rebuildSketch({ storeys: n, sketch: { ...sketchParams.sketch, blocks: sketchParams.sketch.blocks.map(b => b.parent == null ? { ...b, storeys: n } : b) } });
+}
+function stepSize(d) {
+  const w = Math.max(4, Math.min(300, Math.round(sketchParams.width) + d));
+  rebuildSketch({ width: w, depth: sketchParams.depth * w / sketchParams.width });
 }
 
 /* ---------------- UI ---------------- */
@@ -604,6 +633,9 @@ function bindUi() {
   $("openBtn").onclick = () => post({ type: "pickModel" });
   $("sketchBtn").onclick = () => post({ type: "pickSketch" });
   $("winBtn").onclick = cycleWindows;
+  $("roofBtn").onclick = cycleRoof;
+  $("stDown").onclick = () => stepStoreys(-1); $("stUp").onclick = () => stepStoreys(1);
+  $("szDown").onclick = () => stepSize(-1); $("szUp").onclick = () => stepSize(1);
   $("clayBtn").onclick = () => { holdFrame = false; clayOn = !clayOn; applyClay(); };
   $("turnBtn").onclick = () => turn(-1);
   $("spinBtn").onclick = () => spin(-45);
@@ -703,7 +735,7 @@ window.__mono = {
     try { buildFromSketch(JSON.parse(parts.join("")), name || "the sketch"); }
     catch (e) { status("Couldn't build from the sketch: " + (e && e.message)); post({ type: "sketchRead", error: String(e && e.message || e) }); }
   },
-  modelBegin(name) { sketchParams = null; $("winBtn").hidden = true; incoming = { name, parts: [] }; status("Loading " + name + "…"); },
+  modelBegin(name) { sketchParams = null; $("editRow").hidden = true; incoming = { name, parts: [] }; status("Loading " + name + "…"); },
   modelChunk(part) { if (incoming) incoming.parts.push(part); },
   async modelEnd() {
     const job = incoming; incoming = null;
