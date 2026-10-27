@@ -637,7 +637,9 @@ function facePatch(hit, rayDir, flat = false){
   while (queue.length) { const t = queue.pop(); for (let k = 0; k < 3; k++) for (const s of byVert.get(key(t, k)) || []) if (!region.has(s)) { region.add(s); queue.push(s); } }
   const tris2 = [...region].map(t => [0, 1, 2].map(k => frame.uv(triV(T, t, k))));
   const all = tris2.flat(), us = all.map(q => q[0]), vs = all.map(q => q[1]);
-  return { mesh, T, region, tris2, frame, umin: Math.min(...us), umax: Math.max(...us), vmin: Math.min(...vs), vmax: Math.max(...vs) };
+  // the whole wall in this plane (a face broken up by windows is still one wall), for things that run its length
+  const allU = [...cop].flatMap(t => [0, 1, 2].map(k => frame.uv(triV(T, t, k))[0]));
+  return { mesh, T, region, tris2, frame, umin: Math.min(...us), umax: Math.max(...us), vmin: Math.min(...vs), vmax: Math.max(...vs), wallU: [Math.min(...allU), Math.max(...allU)] };
 }
 function inTri(u, v, [a, b, c]){
   const d = (b[1] - c[1]) * (a[0] - c[0]) + (c[0] - b[0]) * (a[1] - c[1]); if (Math.abs(d) < 1e-12) return false;
@@ -732,10 +734,14 @@ export function applyFaceOp(root, hit, rayDir, opts, wallMaterial){
   if (opts.mode === "verandah") {
     // along the whole wall you clicked, at the floor of the storey band you clicked in: a deck, posts, and a skillion roof
     // falling away from the wall
-    const [, hv] = frame.uv(hit.point.clone());
-    const band = Math.min(bands - 1, Math.max(0, Math.floor((hv - patch.vmin) / bh))), vb = patch.vmin + band * bh;
-    const D = opts.verandahDepth || 2.4, Hw = Math.min(opts.verandahHeight || 2.7, bh + 0.2), pitch = 5 * Math.PI / 180, Ho = Hw - D * Math.tan(pitch);
-    const u0 = patch.umin, u1 = patch.umax, L = u1 - u0, k = Math.max(1, Math.ceil(L / 3)), ps = 0.1, rt = 0.06, va = { post: new Acc(), roof: new Acc() };
+    // floors are measured from the bottom of the model (a wall between windows is only a strip of the face)
+    const box = new THREE.Box3().setFromObject(root), sh = opts.storeyHeight || 3.2, g0 = box.min.y - hit.point.y;   // ground, in the face's v (v is up)
+    const vb = g0 + Math.max(0, Math.floor((0 - g0) / sh)) * sh;
+    const D = opts.verandahDepth || 2.4, Hw = opts.verandahHeight || 2.7, pitch = 5 * Math.PI / 180, Ho = Hw - D * Math.tan(pitch);
+    // the whole wall, or a set length centred where you clicked (X slides it along)
+    const [w0, w1] = patch.wallU, want = opts.verandahLength ? Math.min(opts.verandahLength, w1 - w0) : w1 - w0, hu = frame.uv(hit.point.clone())[0];
+    const uc = opts.verandahLength ? Math.min(w1 - want / 2, Math.max(w0 + want / 2, hu)) : (w0 + w1) / 2, u0 = uc - want / 2, u1 = uc + want / 2;
+    const L = u1 - u0, k = Math.max(1, Math.ceil(L / 3)), ps = 0.1, rt = 0.06, va = { post: new Acc(), roof: new Acc() };
     if (L < 1.2) return { ok: false, message: "That wall is too short for a verandah." };
     if (Ho < 2.1) return { ok: false, message: "A verandah that deep would come down below head height. Make it shallower or higher." };
     va.post.box(P((u0 + u1) / 2, vb + 0.075, D / 2), ex, ey, ez, L, 0.15, D);   // the deck
@@ -745,6 +751,7 @@ export function applyFaceOp(root, hit, rayDir, opts, wallMaterial){
     va.roof.thick([P(u0 - 0.1, ya, 0.02), P(u1 + 0.1, ya, 0.02), P(u1 + 0.1, yb, D + o), P(u0 - 0.1, yb, D + o)], rt);
     const added = addMeshes(root, [[va.roof, "Added verandah roof", M.verandah], [va.post, "Added verandah posts and deck", M.post]]);
     dims.push({ key: "verandahDepth", a: toRoot(u1 + 0.4, vb + 0.2, 0), b: toRoot(u1 + 0.4, vb + 0.2, D), value: D, unit: "m", step: 0.1, min: 1, max: 6, hint: "Verandah depth" });
+    dims.push({ key: "verandahLength", a: toRoot(u0, vb + Hw + 0.5, D + 0.3), b: toRoot(u1, vb + Hw + 0.5, D + 0.3), value: L, unit: "m", step: 0.1, min: 1.2, max: 200, hint: "Verandah length (centred where you clicked; X slides it)" });
     dims.push({ key: "verandahHeight", a: toRoot(u0 - 0.4, vb, 0.05), b: toRoot(u0 - 0.4, vb + Hw, 0.05), value: Hw, unit: "m", step: 0.05, min: 2.3, max: 4.5, hint: "Verandah height at the wall" });
     return { ok: true, message: `Added a ${L.toFixed(1)} m long, ${D.toFixed(1)} m deep verandah with ${k + 1} posts.`,
       added, undo: () => { added.forEach(m => { root.remove(m); m.geometry.dispose(); }); undos.reverse().forEach(u => u()); }, dims };
@@ -888,12 +895,14 @@ export const ELEMENT_DEFAULTS = {
   slab: { length: 6, width: 4, thickness: 0.25 },
   wall: { length: 6, height: 3, thickness: 0.2 },
   roof: { length: 6, width: 4, thickness: 0.25, pitchDeg: 25 },
+  column: { width: 0.35, height: 3, shape: "square" },
 };
+export const COLUMN_SHAPES = { square: "Square", round: "Round", steel: "Steel I" };
 const ELEMENT_LIMITS = { length: [0.1, 200], width: [0.1, 200], height: [0.1, 100], thickness: [0.01, 3], pitchDeg: [0, 75], y: [-50, 500], angleDeg: [-360, 360] };
 let elementMats = null;
 export function elementMaterial(kind){
   elementMats = elementMats || {
-    slab: mat("Added slab", 0xb9b4a8), wall: mat("Added wall", 0xd6d1c4), roof: mat("Added roof", 0x6b6459),
+    slab: mat("Added slab", 0xb9b4a8), wall: mat("Added wall", 0xd6d1c4), roof: mat("Added roof", 0x6b6459), column: mat("Added column", 0xc9c4b8),
   };
   return elementMats[kind];
 }
@@ -909,6 +918,19 @@ export function elementGeometry(raw){
   const at = (u, v, w) => [o[0] + ex[0] * u + ez[0] * w, o[1] + v, o[2] + ex[2] * u + ez[2] * w];
   if (e.kind === "slab") acc.box(at(0, e.thickness / 2, 0), ex, [0, 1, 0], ez, e.length, e.thickness, e.width);
   else if (e.kind === "wall") acc.box(at(0, e.height / 2, 0), ex, [0, 1, 0], ez, e.length, e.height, e.thickness);
+  else if (e.kind === "column") {
+    const w = e.width, H = e.height, ey = [0, 1, 0];
+    if (e.shape === "round") {
+      const n = 20, r = w / 2, rim = y => Array.from({ length: n }, (_, i) => at(Math.cos(i / n * Math.PI * 2) * r, y, Math.sin(i / n * Math.PI * 2) * r));
+      const top = rim(H), bot = rim(0);
+      for (let i = 0; i < n; i++) { const j = (i + 1) % n; acc.quad(bot[i], bot[j], top[j], top[i]); }
+      for (let i = 1; i + 1 < n; i++) { acc.tri(top[0], top[i + 1], top[i]); acc.tri(bot[0], bot[i], bot[i + 1]); }
+    } else if (e.shape === "steel") {   // an I-section: two flanges and a web
+      const tf = Math.max(0.012, w * 0.07), tw = Math.max(0.008, w * 0.045);
+      acc.box(at(0, H / 2, -w / 2 + tf / 2), ex, ey, ez, w, H, tf); acc.box(at(0, H / 2, w / 2 - tf / 2), ex, ey, ez, w, H, tf);
+      acc.box(at(0, H / 2, 0), ex, ey, ez, tw, H, w - 2 * tf);
+    } else acc.box(at(0, H / 2, 0), ex, ey, ez, w, H, w);
+  }
   else {
     // low edge at the anchor height on the -w side, rising across its width at the pitch; thickness below the top face
     const tan = Math.tan(THREE.MathUtils.degToRad(e.pitchDeg)), rise = e.width * tan, L = e.length / 2, Wd = e.width / 2;
@@ -921,7 +943,10 @@ export function elementDims(raw){
   const at = (u, v, w) => [o[0] + ex[0] * u + ez[0] * w, o[1] + v, o[2] + ex[2] * u + ez[2] * w];
   const d = (key, a, b, hint, extra = {}) => ({ key, a, b, value: e[key], unit: "m", step: 0.1, min: ELEMENT_LIMITS[key][0], max: ELEMENT_LIMITS[key][1], hint, ...extra });
   const L = e.length / 2, out = [];
-  if (e.kind === "wall") {
+  if (e.kind === "column") {
+    out.push(d("width", at(-e.width / 2, e.height + 0.3, 0), at(e.width / 2, e.height + 0.3, 0), e.shape === "round" ? "Column diameter" : "Column width", { step: 0.05 }));
+    out.push(d("height", at(e.width / 2 + 0.4, 0, 0), at(e.width / 2 + 0.4, e.height, 0), "Column height"));
+  } else if (e.kind === "wall") {
     const off = e.thickness / 2 + 0.5;
     out.push(d("length", at(-L, 0, off), at(L, 0, off), "Wall length"));
     out.push(d("height", at(L + 0.4, 0, off), at(L + 0.4, e.height, off), "Wall height"));
@@ -934,7 +959,7 @@ export function elementDims(raw){
     if (e.kind === "roof") out.push({ key: "pitchDeg", a: at(0, top + rise / 2 + 0.6, 0), value: e.pitchDeg, unit: "°", step: 1, min: 0, max: 75, point: true, hint: "Pitch" });
   }
   out.push({ key: "y", a: at(0, 0, 0), b: [o[0], 0, o[2]], value: e.y, unit: "m", step: 0.1, min: -50, max: 500, hint: "Height above the ground", offsetPx: [0, 0] });
-  out.push({ key: "angleDeg", a: at(0, (e.kind === "wall" ? e.height : e.thickness) + 1.2, 0), value: e.angleDeg || 0, unit: "°", step: 15, min: -360, max: 360, point: true, hint: "Rotation" });
+  out.push({ key: "angleDeg", a: at(0, (e.kind === "wall" || e.kind === "column" ? e.height : e.thickness) + 1.2, 0), value: e.angleDeg || 0, unit: "°", step: 15, min: -360, max: 360, point: true, hint: "Rotation" });
   return out;
 }
 /** Where a new element goes for a click: on the face that was hit, else on the ground plane. */
