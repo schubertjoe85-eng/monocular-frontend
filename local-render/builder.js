@@ -962,6 +962,19 @@ export function elementDims(raw){
   out.push({ key: "angleDeg", a: at(0, (e.kind === "wall" || e.kind === "column" ? e.height : e.thickness) + 1.2, 0), value: e.angleDeg || 0, unit: "°", step: 15, min: -360, max: 360, point: true, hint: "Rotation" });
   return out;
 }
+/** The points an element connects by: wall ends, slab and roof corners, a column's foot and top (root-local). */
+export function elementSnapPoints(raw){
+  const e = clampElement(raw), { ex, ez } = elFrame(e), o = [e.x, e.y, e.z];
+  const at = (u, v, w) => [o[0] + ex[0] * u + ez[0] * w, o[1] + v, o[2] + ex[2] * u + ez[2] * w];
+  const L = (e.length || 0) / 2;
+  // each point is [x, y, z, role]: "end" (a wall's or column's centre line) or "corner"; like snaps to like first
+  const R = (q, role) => [...q, role];
+  if (e.kind === "column") return [R(at(0, 0, 0), "end"), R(at(0, e.height, 0), "end")];
+  if (e.kind === "wall") { const t = e.thickness / 2; return [-L, L].flatMap(u => [R(at(u, 0, 0), "end"), R(at(u, e.height, 0), "end"), ...[at(u, 0, -t), at(u, 0, t), at(u, e.height, -t), at(u, e.height, t)].map(q => R(q, "corner"))]); }
+  const W = e.width / 2, rise = e.kind === "roof" ? e.width * Math.tan(THREE.MathUtils.degToRad(e.pitchDeg)) : 0;
+  return [[-L, -W, 0], [L, -W, 0], [L, W, rise], [-L, W, rise]].flatMap(([u, w, r]) => [R(at(u, r, w), "corner"), R(at(u, r + e.thickness, w), "corner")]);
+}
+
 /** Where a new element goes for a click: on the face that was hit, else on the ground plane. */
 export function elementFromClick(kind, root, hit, ray, cameraRight){
   root.updateMatrixWorld(true);
