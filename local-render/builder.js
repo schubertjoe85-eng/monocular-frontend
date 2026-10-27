@@ -60,6 +60,9 @@ function editMats(){
   return addedMats || (addedMats = {
     frame: mat("Added frame profile", 0x3b3f42, { roughness: 0.5, metalness: 0.3 }),
     glass: mat("Added window glazing", 0x6f8f94, { roughness: 0.05, metalness: 0.1, transparent: true, opacity: 0.4 }),
+    door: mat("Added door leaf", 0x8b7a66),
+    verandah: mat("Added verandah roof", 0x6d7377, { roughness: 0.45, metalness: 0.4 }),
+    post: mat("Added verandah posts and deck", 0xb9b2a6),
   });
 }
 
@@ -163,6 +166,37 @@ function windowUnit(acc, P, ex, ey, ez, o, w){
   acc.glass.quad(P(u0 + f / 2, v0 + f / 2, w), P(u1 - f / 2, v0 + f / 2, w), P(u1 - f / 2, v1 - f / 2, w), P(u0 + f / 2, v1 - f / 2, w));
 }
 
+/* ---- Doors: one set of styles for outside walls, internal walls and Modify. */
+export const DOOR_STYLES = {
+  single:  { label: "Single",           w: 0.92, h: 2.1 },
+  double:  { label: "Double",           w: 1.8,  h: 2.1 },
+  entry:   { label: "Entry + sidelight", w: 1.4, h: 2.1 },
+  glass:   { label: "Glass",            w: 0.92, h: 2.1 },
+  sliding: { label: "Sliding",          w: 2.4,  h: 2.1 },
+  bifold:  { label: "Bifold",           w: 3.6,  h: 2.4 },
+  garage:  { label: "Garage",           w: 4.8,  h: 2.2 },
+};
+export const doorStyleOf = d => DOOR_STYLES[d && d.style] ? d.style : null;
+// A closed door in the opening u0..u1 × v0..v1 of a wall, set in at depth w. P/ex/ey/ez are the wall's own frame.
+function doorUnit(acc, P0, ex, ey, ez, o, w, style, flip = false){
+  const P = flip ? (u, v, d) => P0(o.u0 + o.u1 - u, v, d) : P0;   // flipped: hinge, sidelight and the sliding leaf swap sides
+  const f = FRAME, { u0, u1, v0, v1 } = o, fr = (uc, vc, su, sv, d = w) => acc.frame.box(P(uc, vc, d), ex, ey, ez, su, sv, FRAME_DEPTH);
+  const leaf = (a, b, d = w) => acc.door.box(P((a + b) / 2, (v0 + v1 - f) / 2, d), ex, ey, ez, b - a, v1 - f - v0, 0.045);
+  const pane = (a, b, d = w) => {   // a framed glass panel
+    fr((a + b) / 2, v0 + f, b - a, 2 * f, d); fr((a + b) / 2, v1 - f * 1.5, b - a, f, d); fr(a + f / 2, (v0 + v1) / 2, f, v1 - v0 - f, d); fr(b - f / 2, (v0 + v1) / 2, f, v1 - v0 - f, d);
+    acc.glass.quad(P(a + f, v0 + 2 * f, d), P(b - f, v0 + 2 * f, d), P(b - f, v1 - 2 * f, d), P(a + f, v1 - 2 * f, d));
+  };
+  fr((u0 + u1) / 2, v1 - f / 2, u1 - u0, f); fr(u0 + f / 2, (v0 + v1) / 2, f, v1 - v0); fr(u1 - f / 2, (v0 + v1) / 2, f, v1 - v0);   // head and jambs
+  const a = u0 + f, b = u1 - f, W = b - a;
+  if (style === "double") { leaf(a, a + W / 2 - 0.004); leaf(a + W / 2 + 0.004, b); }
+  else if (style === "entry") { const m = b - Math.min(0.45, W * 0.32); leaf(a, m - f / 2); fr(m, (v0 + v1) / 2, f, v1 - v0); pane(m + f / 2, b); }
+  else if (style === "glass") pane(a, b);
+  else if (style === "sliding") { const n = Math.max(2, Math.round(W / 1.3)), pw = W / n; for (let k = 0; k < n; k++) pane(a + k * pw - (k ? 0.03 : 0), a + (k + 1) * pw + (k < n - 1 ? 0.03 : 0), w + (k % 2 ? -0.05 : 0)); }
+  else if (style === "bifold") { const n = Math.max(3, Math.round(W / 0.9)), pw = W / n; for (let k = 0; k < n; k++) pane(a + k * pw, a + (k + 1) * pw); }
+  else if (style === "garage") { const n = Math.max(3, Math.round((v1 - f - v0) / 0.55)), ph = (v1 - f - v0) / n; for (let k = 0; k < n; k++) acc.door.box(P((a + b) / 2, v0 + (k + 0.5) * ph, w), ex, ey, ez, W, ph - 0.012, 0.05); }
+  else leaf(a, b);
+}
+
 function wallEdge(acc, p, ed, y0, h, doors = [], blank = false, notes = null){
   const tw = p.wallThickness, ex = [ed.e[0], 0, ed.e[1]], ez = [ed.n[0], 0, ed.n[1]], ey = [0, 1, 0];
   const P = (u, v, w) => [ed.A[0] + ed.e[0] * u + ed.n[0] * w, y0 + v, ed.A[1] + ed.e[1] * u + ed.n[1] * w];
@@ -170,7 +204,8 @@ function wallEdge(acc, p, ed, y0, h, doors = [], blank = false, notes = null){
   if (doors.length) {
     if (ops.some(o => o.curtain)) { if (notes) notes.add("Doors in a curtain wall aren't cut; the glazing runs through."); }
     else {
-      const ds = doors.map(d => ({ u0: Math.max(0.05, d.u - d.w / 2), u1: Math.min(ed.L - 0.05, d.u + d.w / 2), v0: 0, v1: Math.min(d.h, h - 0.1), panes: d.kind === "door" ? 1 : 0 }))
+      const ds = doors.map(d => ({ u0: Math.max(0.05, d.u - d.w / 2), u1: Math.min(ed.L - 0.05, d.u + d.w / 2), v0: 0, v1: Math.min(d.h, h - 0.1), panes: 0,
+        door: d.kind === "door" ? (doorStyleOf(d) || "glass") : null, flip: d.swing === -1 }))
         .filter(o => o.u1 - o.u0 > 0.3);
       ops = ops.filter(o => !ds.some(d => o.u1 > d.u0 - 0.15 && o.u0 < d.u1 + 0.15)).concat(ds);
     }
@@ -190,7 +225,8 @@ function wallEdge(acc, p, ed, y0, h, doors = [], blank = false, notes = null){
       acc.wall.quad(P(o.u0, o.v0, 0), P(o.u0, o.v0, -tw), P(o.u0, o.v1, -tw), P(o.u0, o.v1, 0));
       acc.wall.quad(P(o.u1, o.v0, 0), P(o.u1, o.v1, 0), P(o.u1, o.v1, -tw), P(o.u1, o.v0, -tw));
     }
-    if (o.panes) windowUnit(acc, P, ex, ey, ez, o, o.curtain ? -0.05 : -tw * 0.4);   // an opening (panes 0) stays open
+    if (o.door) doorUnit(acc, P, ex, ey, ez, o, -tw * 0.4, o.door, o.flip);
+    else if (o.panes) windowUnit(acc, P, ex, ey, ez, o, o.curtain ? -0.05 : -tw * 0.4);   // an opening (panes 0) stays open
   }
 }
 
@@ -580,13 +616,14 @@ function cutMesh(mesh, triSet, frame, rects, dropAll){
 }
 
 // The flat, connected patch of wall around a click, and a 2D frame on it (u to the right as seen, v up).
-function facePatch(hit, rayDir){
+function facePatch(hit, rayDir, flat = false){
   const mesh = hit.object, T = worldTris(mesh), nt = T.length / 9;
   const n = triNormal(T, hit.faceIndex);
   if (!n) return { error: "That face is too small to work on." };
   if (n.dot(rayDir) > 0) n.negate();
-  if (Math.abs(n.y) > 0.35) return { error: "Click a wall. That face isn't vertical enough for windows." };
-  const o = hit.point.clone(), U = new THREE.Vector3().crossVectors(Y, n).normalize(), V = new THREE.Vector3().crossVectors(n, U).normalize();
+  if (!flat && Math.abs(n.y) > 0.35) return { error: "Click a wall. That face isn't vertical enough for windows." };
+  if (flat && n.y < 0.9) return { error: "Click the top of a deck, balcony, slab or flat roof, near the edge the balustrade goes along." };
+  const o = hit.point.clone(), U = flat ? new THREE.Vector3(1, 0, 0) : new THREE.Vector3().crossVectors(Y, n).normalize(), V = new THREE.Vector3().crossVectors(n, U).normalize();
   const frame = { o, n, U, V, uv: p => { const d = p.clone().sub(o); return [d.dot(U), d.dot(V)]; }, at: (u, v, w = 0) => o.clone().addScaledVector(U, u).addScaledVector(V, v).addScaledVector(n, w) };
   const cop = new Set(), key = (t, k) => `${Math.round(T[t * 9 + k * 3] * 1000)},${Math.round(T[t * 9 + k * 3 + 1] * 1000)},${Math.round(T[t * 9 + k * 3 + 2] * 1000)}`;
   const byVert = new Map();
@@ -660,6 +697,7 @@ function addMeshes(root, accs, names){
 
 /** Punch windows into, or curtain-glaze, the flat wall patch that was clicked. */
 export function applyFaceOp(root, hit, rayDir, opts, wallMaterial){
+  if (opts.mode === "balustrade") return applyBalustrade(root, hit, rayDir, opts);
   const patch = facePatch(hit, rayDir);
   if (patch.error) return { ok: false, message: patch.error };
   root.updateMatrixWorld(true);
@@ -689,6 +727,56 @@ export function applyFaceOp(root, hit, rayDir, opts, wallMaterial){
     dim("windowWidth", toRoot(u0, patch.vmin + 0.5, 0.1), toRoot(u0 + pw, patch.vmin + 0.5, 0.1), "Pane width");
     if (bands > 1 || H > 2) dim("storeyHeight", toRoot(patch.umax + 0.4, patch.vmin, 0.1), toRoot(patch.umax + 0.4, patch.vmin + bh, 0.1), "Transom spacing (storey height)");
     return { ok: true, message: `Glazed a ${span.toFixed(2)} × ${H.toFixed(2)} m wall: ${cols} bays, ${bands} storey${bands > 1 ? "s" : ""}.`, added, undo: () => { added.forEach(m => { root.remove(m); m.geometry.dispose(); }); undos.reverse().forEach(u => u()); }, dims };
+  }
+
+  if (opts.mode === "verandah") {
+    // along the whole wall you clicked, at the floor of the storey band you clicked in: a deck, posts, and a skillion roof
+    // falling away from the wall
+    const [, hv] = frame.uv(hit.point.clone());
+    const band = Math.min(bands - 1, Math.max(0, Math.floor((hv - patch.vmin) / bh))), vb = patch.vmin + band * bh;
+    const D = opts.verandahDepth || 2.4, Hw = Math.min(opts.verandahHeight || 2.7, bh + 0.2), pitch = 5 * Math.PI / 180, Ho = Hw - D * Math.tan(pitch);
+    const u0 = patch.umin, u1 = patch.umax, L = u1 - u0, k = Math.max(1, Math.ceil(L / 3)), ps = 0.1, rt = 0.06, va = { post: new Acc(), roof: new Acc() };
+    if (L < 1.2) return { ok: false, message: "That wall is too short for a verandah." };
+    if (Ho < 2.1) return { ok: false, message: "A verandah that deep would come down below head height. Make it shallower or higher." };
+    va.post.box(P((u0 + u1) / 2, vb + 0.075, D / 2), ex, ey, ez, L, 0.15, D);   // the deck
+    for (let j = 0; j <= k; j++) { const u = Math.min(u1 - ps / 2 - 0.05, Math.max(u0 + ps / 2 + 0.05, u0 + L * j / k)); va.post.box(P(u, vb + 0.15 + (Ho - 0.15) / 2, D - 0.15), ex, ey, ez, ps, Ho - 0.15, ps); }
+    va.post.box(P((u0 + u1) / 2, vb + Ho - 0.1, D - 0.15), ex, ey, ez, L, 0.2, 0.1);   // the beam over the posts
+    const o = 0.3, ya = vb + Hw, yb = vb + Ho - o * Math.tan(pitch);   // the roof sheet, running past the beam
+    va.roof.thick([P(u0 - 0.1, ya, 0.02), P(u1 + 0.1, ya, 0.02), P(u1 + 0.1, yb, D + o), P(u0 - 0.1, yb, D + o)], rt);
+    const added = addMeshes(root, [[va.roof, "Added verandah roof", M.verandah], [va.post, "Added verandah posts and deck", M.post]]);
+    dims.push({ key: "verandahDepth", a: toRoot(u1 + 0.4, vb + 0.2, 0), b: toRoot(u1 + 0.4, vb + 0.2, D), value: D, unit: "m", step: 0.1, min: 1, max: 6, hint: "Verandah depth" });
+    dims.push({ key: "verandahHeight", a: toRoot(u0 - 0.4, vb, 0.05), b: toRoot(u0 - 0.4, vb + Hw, 0.05), value: Hw, unit: "m", step: 0.05, min: 2.3, max: 4.5, hint: "Verandah height at the wall" });
+    return { ok: true, message: `Added a ${L.toFixed(1)} m long, ${D.toFixed(1)} m deep verandah with ${k + 1} posts.`,
+      added, undo: () => { added.forEach(m => { root.remove(m); m.geometry.dispose(); }); undos.reverse().forEach(u => u()); }, dims };
+  }
+
+  if (opts.mode === "door") {
+    // one door where you clicked, standing on the floor of the storey band you clicked in
+    const style = DOOR_STYLES[opts.doorStyle] ? opts.doorStyle : "single", st = DOOR_STYLES[style];
+    const dw = opts.doorWidth || st.w, dh = opts.doorHeight || st.h;
+    const [hu, hv] = frame.uv(hit.point.clone());
+    const band = Math.min(bands - 1, Math.max(0, Math.floor((hv - patch.vmin) / bh))), vb = patch.vmin + band * bh;
+    const uc = Math.min(patch.umax - dw / 2 - 0.05, Math.max(patch.umin + dw / 2 + 0.05, hu));
+    const r = { u0: uc - dw / 2, u1: uc + dw / 2, v0: vb, v1: Math.min(vb + dh, vb + bh - 0.1) };
+    let inside = r.u1 - r.u0 > 0.4 && r.v1 - r.v0 > 1.5;
+    for (let a = 0; a <= 4 && inside; a++) for (let c = 0; c <= 4 && inside; c++) inside = inPatch(patch, r.u0 + 0.01 + (dw - 0.02) * a / 4, r.v0 + 0.02 + (r.v1 - r.v0 - 0.03) * c / 4);
+    if (!inside) return { ok: false, message: `No room on that wall for a ${dw.toFixed(2)} × ${dh.toFixed(2)} m ${st.label.toLowerCase()} door. Try a narrower one, or click nearer the middle of the wall.` };
+    const overlap = q => Math.max(...q.map(x => x[0])) > r.u0 && Math.min(...q.map(x => x[0])) < r.u1 && Math.max(...q.map(x => x[1])) > r.v0 && Math.min(...q.map(x => x[1])) < r.v1;
+    const back = backFaces(root, patch, 0.8, overlap), dd = back.depth;
+    undos.push(cutMesh(patch.mesh, patch.region, frame, [r], false));
+    for (const [m, set] of back.found) undos.push(cutMesh(m, set, frame, [r], false));
+    if (dd > 0) {
+      acc.wall.quad(P(r.u0, r.v1, 0), P(r.u0, r.v1, -dd), P(r.u1, r.v1, -dd), P(r.u1, r.v1, 0));
+      acc.wall.quad(P(r.u0, r.v0, 0), P(r.u0, r.v0, -dd), P(r.u0, r.v1, -dd), P(r.u0, r.v1, 0));
+      acc.wall.quad(P(r.u1, r.v0, 0), P(r.u1, r.v1, 0), P(r.u1, r.v1, -dd), P(r.u1, r.v0, -dd));
+    }
+    acc.door = new Acc();
+    doorUnit(acc, P, ex, ey, ez, r, -Math.max(dd, 0.1) * 0.4, style, !!opts.doorFlip);
+    const added = addMeshes(root, [[acc.door, "Added door leaf", M.door], [acc.glass, "Added door glazing", M.glass], [acc.frame, "Added door frame", M.frame], [acc.wall, "Added door reveals", wallMaterial]]);
+    dims.push({ key: "doorWidth", a: toRoot(r.u0, r.v1 + 0.3, 0.1), b: toRoot(r.u1, r.v1 + 0.3, 0.1), value: dw, unit: "m", step: 0.05, min: 0.5, max: 8, hint: "Door width" });
+    dims.push({ key: "doorHeight", a: toRoot(r.u1 + 0.3, r.v0, 0.1), b: toRoot(r.u1 + 0.3, r.v1, 0.1), value: r.v1 - r.v0, unit: "m", step: 0.05, min: 1.8, max: 4, hint: "Door height" });
+    return { ok: true, message: `Added a ${st.label.toLowerCase()} door, ${dw.toFixed(2)} × ${(r.v1 - r.v0).toFixed(2)} m` + (dd > 0 ? "." : ". The wall has no inside face, so there are no reveals."),
+      added, undo: () => { added.forEach(m => { root.remove(m); m.geometry.dispose(); }); undos.reverse().forEach(u => u()); }, dims };
   }
 
   const ww = opts.windowWidth, rects = [];
@@ -729,6 +817,47 @@ export function applyFaceOp(root, hit, rayDir, opts, wallMaterial){
     message: `Added ${rects.length} window${rects.length > 1 ? "s" : ""} over ${bands} floor band${bands > 1 ? "s" : ""}` + (dd > 0 ? `, ${Math.round(dd * 1000)} mm reveals.` : ". The wall has no inside face, so there are no reveals."),
     added, undo: () => { added.forEach(m => { root.remove(m); m.geometry.dispose(); }); undos.reverse().forEach(u => u()); }, dims,
   };
+}
+
+export const BALUSTRADE_STYLES = { glass: "Glass", rails: "Posts and rails", solid: "Solid" };
+/** A balustrade along the edge of a flat surface (deck, balcony, slab, flat roof) nearest where you clicked. */
+function applyBalustrade(root, hit, rayDir, opts){
+  const patch = facePatch(hit, rayDir, true);
+  if (patch.error) return { ok: false, message: patch.error };
+  root.updateMatrixWorld(true);
+  const { frame } = patch, M = editMats(), acc = { frame: new Acc(), glass: new Acc(), solid: new Acc() };
+  // the outline of the surface: triangle edges used once
+  const k = q => `${Math.round(q[0] * 200)},${Math.round(q[1] * 200)}`, cnt = new Map();
+  for (const t of patch.tris2) for (let i = 0; i < 3; i++) { const a = t[i], b = t[(i + 1) % 3], kk = [k(a), k(b)].sort().join("|"); const e = cnt.get(kk); if (e) e.n++; else cnt.set(kk, { a, b, n: 1 }); }
+  const edges2 = [...cnt.values()].filter(e => e.n === 1 && Math.hypot(e.b[0] - e.a[0], e.b[1] - e.a[1]) > 0.05);
+  if (!edges2.length) return { ok: false, message: "Couldn't find the edge of that surface." };
+  const near = e => segDist([0, 0], e.a, e.b).d, best = edges2.reduce((m, e) => near(e) < near(m) ? e : m);
+  // the whole straight run of edge it's part of
+  const L0 = Math.hypot(best.b[0] - best.a[0], best.b[1] - best.a[1]), d = [(best.b[0] - best.a[0]) / L0, (best.b[1] - best.a[1]) / L0];
+  const off = e => Math.abs((e[0] - best.a[0]) * d[1] - (e[1] - best.a[1]) * d[0]);
+  const run = edges2.filter(e => off(e.a) < 0.02 && off(e.b) < 0.02).flatMap(e => [e.a, e.b]).map(q => (q[0] - best.a[0]) * d[0] + (q[1] - best.a[1]) * d[1]);
+  const t0 = Math.min(...run), t1 = Math.max(...run), len = t1 - t0;
+  // set in 50 mm from the edge, on the side you clicked
+  let nn = [-d[1], d[0]]; if ((0 - best.a[0]) * nn[0] + (0 - best.a[1]) * nn[1] < 0) nn = [-nn[0], -nn[1]];
+  const at = (t, inset) => [best.a[0] + d[0] * t + nn[0] * inset, best.a[1] + d[1] * t + nn[1] * inset];
+  const P = (t, h, inset = 0.05) => { const q = at(t, inset); return frame.at(q[0], q[1], h).toArray(); };
+  const ex = frame.U.clone().multiplyScalar(d[0]).addScaledVector(frame.V, d[1]).toArray(), ey = frame.n.toArray(), ez = frame.U.clone().multiplyScalar(nn[0]).addScaledVector(frame.V, nn[1]).toArray();
+  const H = opts.balustradeHeight || 1.0, style = BALUSTRADE_STYLES[opts.balustradeStyle] ? opts.balustradeStyle : "glass", mid = (t0 + t1) / 2;
+  if (style === "solid") acc.solid.box(P(mid, H / 2), ex, ey, ez, len, H, 0.1);
+  else if (style === "glass") {
+    acc.glass.box(P(mid, (H - 0.05) / 2 + 0.03), ex, ey, ez, len - 0.02, H - 0.08, 0.012);
+    acc.frame.box(P(mid, H - 0.025), ex, ey, ez, len, 0.05, 0.05);   // the handrail
+    acc.frame.box(P(mid, 0.03), ex, ey, ez, len, 0.06, 0.04);        // the base channel
+  } else {
+    const np = Math.max(1, Math.ceil(len / 1.2));
+    for (let j = 0; j <= np; j++) acc.frame.box(P(t0 + 0.03 + (len - 0.06) * j / np, H / 2), ex, ey, ez, 0.05, H, 0.05);
+    acc.frame.box(P(mid, H - 0.025), ex, ey, ez, len, 0.05, 0.06); acc.frame.box(P(mid, 0.12), ex, ey, ez, len, 0.04, 0.04);
+    const nb = Math.floor(len / 0.12);
+    for (let j = 1; j < nb; j++) acc.frame.box(P(t0 + len * j / nb, (0.14 + H - 0.05) / 2), ex, ey, ez, 0.02, H - 0.19, 0.02);
+  }
+  const added = addMeshes(root, [[acc.glass, "Added balustrade glass", M.glass], [acc.frame, "Added balustrade rails", M.frame], [acc.solid, "Added balustrade wall", M.post]]);
+  const dims = [{ key: "balustradeHeight", a: root.worldToLocal(new THREE.Vector3(...P(t1, 0, 0.3))).toArray(), b: root.worldToLocal(new THREE.Vector3(...P(t1, H, 0.3))).toArray(), value: H, unit: "m", step: 0.05, min: 0.6, max: 2, hint: "Balustrade height" }];
+  return { ok: true, message: `Added a ${len.toFixed(2)} m ${BALUSTRADE_STYLES[style].toLowerCase()} balustrade, ${H.toFixed(2)} m high.`, added, undo: () => { added.forEach(m => { root.remove(m); m.geometry.dispose(); }); }, dims };
 }
 
 /** Take a part out of the model (kept for undo). */
@@ -1491,6 +1620,26 @@ export function interpretElevation(vision, current = {}){
   return { params: P, read, assumed, overlay, roofOverlay: [], image: { w: W, h: H }, widthM: facadeW };
 }
 
+/* ---- Building styles: one tap sets the roof, eaves, walls, windows and the door style new doors get. */
+export const BUILDING_STYLES = {
+  modern:     { label: "Modern",     p: { roofType: "flat", parapet: 0.6, overhang: 0, wallThickness: 0.3, windowType: "ribbon", windowHeight: 1.8, sillHeight: 0.6, slabEdge: 0 }, door: "glass" },
+  coastal:    { label: "Coastal",    p: { roofType: "mono", roofPitchDeg: 10, overhang: 0.9, parapet: 0, wallThickness: 0.25, windowType: "punched", windowWidth: 2.4, windowHeight: 2.1, sillHeight: 0.3, windowPitch: 3.4, slabEdge: 1.5 }, door: "sliding" },
+  federation: { label: "Federation", p: { roofType: "hip", roofPitchDeg: 30, overhang: 0.45, parapet: 0, wallThickness: 0.35, windowType: "punched", windowWidth: 0.9, windowHeight: 1.8, sillHeight: 0.9, windowPitch: 2.4, slabEdge: 0 }, door: "entry" },
+  farmhouse:  { label: "Farmhouse",  p: { roofType: "gable", roofPitchDeg: 35, overhang: 0.6, parapet: 0, wallThickness: 0.3, windowType: "punched", windowWidth: 1.0, windowHeight: 1.6, sillHeight: 0.9, windowPitch: 2.8, slabEdge: 0 }, door: "double" },
+  industrial: { label: "Industrial", p: { roofType: "gable", roofPitchDeg: 15, overhang: 0.2, parapet: 0, wallThickness: 0.25, windowType: "ribbon", windowHeight: 2.4, sillHeight: 1.2, slabEdge: 0 }, door: "garage" },
+  glass:      { label: "Glass box",  p: { roofType: "flat", parapet: 0.3, overhang: 0, wallThickness: 0.2, windowType: "curtain", windowWidth: 1.5, slabEdge: 0 }, door: "glass" },
+};
+/** A building style applied: its settings, with roof shapes read off a sketch replaced by the style's roof and the
+ *  sketch's walls that were drawn solid taking the style's windows (walls drawn as glass stay glass). */
+export function applyBuildingStyle(p, key){
+  const st = BUILDING_STYLES[key]; if (!st) return p;
+  const out = { ...p, ...st.p };
+  if (p.facades) out.facades = Object.fromEntries(Object.entries(p.facades).filter(([, f]) => f.windowType !== "none"));
+  if (p.shape === "sketch" && p.sketch && p.sketch.blocks)
+    out.sketch = { ...p.sketch, blocks: p.sketch.blocks.map(b => b.roof ? { ...b, roof: { ...b.roof, type: null, ridge: null } } : b) };
+  return out;
+}
+
 /** The settings read off an elevation, applied to the building: storeys go onto a sketched building's main block
  *  (when there's one; several keep their own), and the roof replaces any roof shape read off the plan. */
 export function applyElevation(p, e){
@@ -1520,9 +1669,11 @@ export const INTERIOR_DEFAULTS = {
   door: { w: 0.92, h: 2.1, swing: 1 },
   opening: { w: 1.2, h: 2.4 },
   stair: { w: 1.1, type: "dogleg", ang: 0 },
-  core: { w: 2.6, d: 2.4, t: 0.2, ang: 0 },
+  core: { w: 2.6, d: 2.4, t: 0.2, ang: 0, style: "lift" },
   column: { s: 0.4, round: false },
 };
+export const STAIR_TYPES = { straight: "Straight", dogleg: "Dogleg", L: "L-shape", spiral: "Spiral" };
+export const CORE_STYLES = { lift: "Lift", glass: "Glass lift", services: "Services" };
 export const INTERIOR_LIMITS = { t: [0.05, 0.6], w: [0.5, 12], h: [1.8, 6], d: [1, 12], s: [0.15, 2] };
 export const levelName = i => i === 0 ? "Ground floor" : `Level ${i}`;
 export function clampItem(it){
@@ -1564,6 +1715,11 @@ function stairPlan(it, H){
   if (it.rise) H = it.rise;   // a half flight between split levels
   const R = Math.max(2, Math.ceil(H / 0.18)), r = H / R, g = 0.26, W = it.w;
   if (it.type === "straight") { const T = R - 1, L = T * g; return { R, r, g, L, Wt: W, T1: T, T2: 0, void: [-L / 2, L / 2] }; }
+  if (it.type === "spiral") { const D = Math.max(1.6, 2 * W + 0.24); return { R, r, g, L: D, Wt: D, T1: R - 1, T2: 0, void: [-D / 2, D / 2] }; }
+  if (it.type === "L") {   // two flights at right angles round a square landing
+    const R1 = Math.ceil(R / 2), R2 = R - R1, T1 = R1 - 1, T2 = R2 - 1, L = T1 * g + W, Wt = W + T2 * g;
+    return { R, r, g, L, Wt, T1, T2, R1, void: [-L / 2, L / 2] };
+  }
   const R1 = Math.ceil(R / 2), R2 = R - R1, T1 = R1 - 1, T2 = R2 - 1, L = T1 * g + W, Wt = 2 * W + 0.1;
   return { R, r, g, L, Wt, T1, T2, R1, void: [L / 2 - W - T2 * g, L / 2] };
 }
@@ -1635,7 +1791,20 @@ function iwallInto(A, it, doors, y0, h){
   for (const g of gaps) {
     if (g.u0 < u) continue;
     seg(u, g.u0, 0, h); seg(g.u0, g.u1, g.h, h); u = g.u1;
-    if (g.d.kind === "door") {   // a leaf standing open at 80°, hinged at one jamb, and a slim frame
+    const ds = g.d.kind === "door" ? doorStyleOf(g.d) : null;
+    if (ds && ds !== "single" && ds !== "double") {   // sliding, glass, bifold, entry or garage: closed, in the wall's middle
+      const Pw = (uu, v, w) => [it.a[0] + e[0] * uu + n[0] * w, y0 + v, it.a[1] + e[1] * uu + n[1] * w];
+      doorUnit(A, Pw, ex, ey, ez, { u0: g.u0, u1: g.u1, v0: 0, v1: g.h }, 0, ds, g.d.swing === -1);
+    } else if (ds === "double") {   // two leaves standing open
+      const s = g.d.swing === -1 ? -1 : 1, lw = (g.u1 - g.u0) / 2 - 0.04, a = THREE.MathUtils.degToRad(80);
+      for (const [u, sg] of [[g.u0 + 0.03, 1], [g.u1 - 0.03, -1]]) {
+        const hinge = [it.a[0] + e[0] * u + n[0] * s * t / 2, it.a[1] + e[1] * u + n[1] * s * t / 2];
+        const dir = [sg * e[0] * Math.cos(a) + n[0] * s * Math.sin(a), sg * e[1] * Math.cos(a) + n[1] * s * Math.sin(a)];
+        A.door.box([hinge[0] + dir[0] * lw / 2, y0 + (g.h - 0.01) / 2, hinge[1] + dir[1] * lw / 2], [dir[0], 0, dir[1]], ey, [-dir[1], 0, dir[0]], lw, g.h - 0.02, 0.04);
+      }
+      for (const uu of [g.u0 + 0.015, g.u1 - 0.015]) A.frame.box(P(uu, g.h / 2), ex, ey, ez, 0.03, g.h, t + 0.02);
+      A.frame.box(P((g.u0 + g.u1) / 2, g.h - 0.015), ex, ey, ez, g.u1 - g.u0, 0.03, t + 0.02);
+    } else if (g.d.kind === "door") {   // a leaf standing open at 80°, hinged at one jamb, and a slim frame
       const s = g.d.swing === -1 ? -1 : 1, lw = g.u1 - g.u0 - 0.06, a = THREE.MathUtils.degToRad(80);
       const hinge = [it.a[0] + e[0] * (g.u0 + 0.03) + n[0] * s * t / 2, it.a[1] + e[1] * (g.u0 + 0.03) + n[1] * s * t / 2];
       const dir = [e[0] * Math.cos(a) + n[0] * s * Math.sin(a), e[1] * Math.cos(a) + n[1] * s * Math.sin(a)];
@@ -1652,6 +1821,24 @@ function stairInto(A, it, s, y0){
   const P = (u, w, y) => [it.x + e[0] * u + n[0] * w, y0 + y, it.z + e[1] * u + n[1] * w];
   const step = (u0, u1, w0, w1, top) => A.stair.box(P((u0 + u1) / 2, (w0 + w1) / 2, top / 2), ex, ey, ez, Math.abs(u1 - u0), top, Math.abs(w1 - w0));
   const L = s.L, W = it.w;
+  if (it.type === "spiral") {
+    // treads fanned round a centre post, each turned a step further, about 300° to the floor above
+    const R0 = 0.11, rc = R0 + W / 2, da = Math.min(30, 300 / Math.max(1, s.T1)) * Math.PI / 180, tw = Math.max(0.2, rc * da * 1.25);
+    A.col.box(P(0, 0, (s.R * s.r) / 2), ex, ey, ez, 2 * R0, s.R * s.r, 2 * R0);
+    for (let j = 0; j < s.T1; j++) {
+      const a = j * da, c = [Math.cos(a), Math.sin(a)], d = [-c[1], c[0]];
+      const ru = [e[0] * c[0] + n[0] * c[1], 0, e[1] * c[0] + n[1] * c[1]], rv = [e[0] * d[0] + n[0] * d[1], 0, e[1] * d[0] + n[1] * d[1]];
+      A.stair.box(P(c[0] * rc, c[1] * rc, (j + 1) * s.r - 0.025), ru, ey, rv, W, 0.05, tw);
+    }
+    return;
+  }
+  if (it.type === "L") {
+    const w0 = -s.Wt / 2, u1 = L / 2 - W;
+    for (let j = 0; j < s.T1; j++) step(-L / 2 + j * s.g, -L / 2 + (j + 1) * s.g, w0, w0 + W, (j + 1) * s.r);
+    step(u1, L / 2, w0, w0 + W, s.R1 * s.r);   // the landing in the corner
+    for (let j = 0; j < s.T2; j++) step(u1, L / 2, w0 + W + j * s.g, w0 + W + (j + 1) * s.g, (s.R1 + j + 1) * s.r);
+    return;
+  }
   if (it.type === "straight") { for (let j = 0; j < s.T1; j++) step(-L / 2 + j * s.g, -L / 2 + (j + 1) * s.g, -W / 2, W / 2, (j + 1) * s.r); return; }
   const w1 = [-s.Wt / 2, -s.Wt / 2 + W], w2 = [s.Wt / 2 - W, s.Wt / 2];
   for (let j = 0; j < s.T1; j++) step(-L / 2 + j * s.g, -L / 2 + (j + 1) * s.g, w1[0], w1[1], (j + 1) * s.r);
@@ -1671,15 +1858,34 @@ function interiorInto(A, p, blocks, notes){
       else if (it.kind === "stair") { if (it.rise || blocks.some(b => L + 1 < b.base + b.n && blocksAtPoint([b], [it.x, it.z]).length)) stairInto(A, it, stairPlan(it, H), y0); }   // none on the top floor: nowhere to go
       else if (it.kind === "core") {
         const { e, n } = ROT(it.ang), ex = [e[0], 0, e[1]], ez = [n[0], 0, n[1]], ey = [0, 1, 0], P = (u, w, v) => [it.x + e[0] * u + n[0] * w, y0 + v, it.z + e[1] * u + n[1] * w];
-        const a = it.w / 2, b = it.d / 2, t = it.t, dw = Math.min(1.1, it.w - 2 * t - 0.2), dh = Math.min(2.1, h - 0.1);
-        A.col.box(P(0, -b + t / 2, h / 2), ex, ey, ez, it.w, h, t);                         // back
-        A.col.box(P(-a + t / 2, 0, h / 2), ex, ey, ez, t, h, it.d - 2 * t);                 // sides
-        A.col.box(P(a - t / 2, 0, h / 2), ex, ey, ez, t, h, it.d - 2 * t);
-        const side = (it.w - dw) / 2;                                                      // front, with the lift door
-        A.col.box(P(-a + side / 2, b - t / 2, h / 2), ex, ey, ez, side, h, t);
-        A.col.box(P(a - side / 2, b - t / 2, h / 2), ex, ey, ez, side, h, t);
-        A.col.box(P(0, b - t / 2, (dh + h) / 2), ex, ey, ez, dw, h - dh, t);
-        A.door.box(P(0, b - t / 2, dh / 2), ex, ey, ez, dw, dh, 0.04);
+        const a = it.w / 2, b = it.d / 2, t = it.t, dw = Math.min(1.1, it.w - 2 * t - 0.2), dh = Math.min(2.1, h - 0.1), style = it.style || "lift";
+        if (style === "glass") {
+          // a glass shaft: corner posts, a frame at each floor, glass all round, the car inside, sliding doors at the front
+          const f = 0.08;
+          for (const [u, w] of [[-a, -b], [a, -b], [-a, b], [a, b]]) A.frame.box(P(u + (u < 0 ? f / 2 : -f / 2), w + (w < 0 ? f / 2 : -f / 2), h / 2), ex, ey, ez, f, h, f);
+          A.frame.box(P(0, -b + f / 2, h - f / 2), ex, ey, ez, it.w, f, f); A.frame.box(P(0, b - f / 2, h - f / 2), ex, ey, ez, it.w, f, f);
+          A.frame.box(P(-a + f / 2, 0, h - f / 2), ex, ey, ez, f, f, it.d); A.frame.box(P(a - f / 2, 0, h - f / 2), ex, ey, ez, f, f, it.d);
+          A.glass.box(P(0, -b + f / 2, h / 2), ex, ey, ez, it.w - 2 * f, h - f, 0.012);
+          A.glass.box(P(-a + f / 2, 0, h / 2), ex, ey, ez, 0.012, h - f, it.d - 2 * f);
+          A.glass.box(P(a - f / 2, 0, h / 2), ex, ey, ez, 0.012, h - f, it.d - 2 * f);
+          const side = (it.w - dw) / 2;
+          A.glass.box(P(-a + side / 2, b - f / 2, h / 2), ex, ey, ez, side - f, h - f, 0.012); A.glass.box(P(a - side / 2, b - f / 2, h / 2), ex, ey, ez, side - f, h - f, 0.012);
+          A.glass.box(P(0, b - f / 2, (dh + h) / 2), ex, ey, ez, dw, h - dh - f, 0.012);
+          A.frame.box(P(-dw / 4, b - f / 2, dh / 2), ex, ey, ez, dw / 2 - 0.01, dh, 0.03); A.frame.box(P(dw / 4, b - f / 2, dh / 2), ex, ey, ez, dw / 2 - 0.01, dh, 0.03);
+          if (L === lv[0]) A.door.box(P(0, 0, 1.2), ex, ey, ez, it.w - 0.5, 2.4, it.d - 0.5);   // the lift car, waiting on the lowest floor
+        } else {
+          A.col.box(P(0, -b + t / 2, h / 2), ex, ey, ez, it.w, h, t);                         // back
+          A.col.box(P(-a + t / 2, 0, h / 2), ex, ey, ez, t, h, it.d - 2 * t);                 // sides
+          A.col.box(P(a - t / 2, 0, h / 2), ex, ey, ez, t, h, it.d - 2 * t);
+          if (style === "services") A.col.box(P(0, b - t / 2, h / 2), ex, ey, ez, it.w - 2 * t, h, t);   // closed all round, a riser door only
+          else {
+            const side = (it.w - dw) / 2;                                                      // front, with the lift doors
+            A.col.box(P(-a + side / 2, b - t / 2, h / 2), ex, ey, ez, side, h, t);
+            A.col.box(P(a - side / 2, b - t / 2, h / 2), ex, ey, ez, side, h, t);
+            A.col.box(P(0, b - t / 2, (dh + h) / 2), ex, ey, ez, dw, h - dh, t);
+            A.frame.box(P(-dw / 4, b - t / 2, dh / 2), ex, ey, ez, dw / 2 - 0.01, dh, 0.04); A.frame.box(P(dw / 4, b - t / 2, dh / 2), ex, ey, ez, dw / 2 - 0.01, dh, 0.04);
+          }
+        }
       } else if (it.kind === "column") {
         const q = itemOutline(p, it), top = q.map(([x, z]) => [x, y0 + h, z]), bot = q.map(([x, z]) => [x, y0, z]);
         for (let i = 1; i + 1 < q.length; i++) { A.col.tri(top[0], top[i + 1], top[i]); A.col.tri(bot[0], bot[i], bot[i + 1]); }
@@ -1775,10 +1981,12 @@ function doorCentre(p, blocks, items, d){
   return [h.A[0] + h.e[0] * d.u + h.n[0] * h.inset, h.A[1] + h.e[1] * d.u + h.n[1] * h.inset];
 }
 /** A door or opening for a click: on the nearest internal wall, or the nearest outside wall, on storey L. */
-export function doorFromClick(raw, L, pt, tol, kind){
-  const p = clampParams(raw), blocks = blocksFor(p), items = (p.interior || []).map(clampItem), base = INTERIOR_DEFAULTS[kind];
+export function doorFromClick(raw, L, pt, tol, kind, want = {}){
+  const p = clampParams(raw), blocks = blocksFor(p), items = (p.interior || []).map(clampItem), base = { ...INTERIOR_DEFAULTS[kind], ...want };
   let best = null;
-  for (const w of items) if (w.kind === "wall" && levelsOf(blocks, w, items).includes(L)) {
+  // an external door goes only in an outside wall, and finds the nearest one from further away
+  const otol = want.outsideOnly ? Math.max(tol, 1.5) : tol;
+  if (!want.outsideOnly) for (const w of items) if (w.kind === "wall" && levelsOf(blocks, w, items).includes(L)) {
     const r = segDist(pt, w.a, w.b), len = Math.hypot(w.b[0] - w.a[0], w.b[1] - w.a[1]);
     if (r.d < w.t / 2 + tol && (!best || r.d < best.d)) best = { d: r.d, host: w.id, u: r.t * len, L: len };
   }
@@ -1786,7 +1994,7 @@ export function doorFromClick(raw, L, pt, tol, kind){
     if (L < b.base || L >= b.base + b.n) return;
     [b.fp.outer, ...b.fp.holes].forEach((loop, li) => edges(loop, li !== 0).forEach((ed, ei) => {
       const r = segDist(pt, ed.A, ed.B);
-      if (r.d < p.wallThickness + tol && (!best || r.d < best.d)) best = { d: r.d, host: { b: bi, l: li, e: ei }, u: r.t * ed.L, L: ed.L, outside: true };
+      if (r.d < p.wallThickness + otol && (!best || r.d < best.d)) best = { d: r.d, host: { b: bi, l: li, e: ei }, u: r.t * ed.L, L: ed.L, outside: true };
     }));
   });
   if (!best) return null;

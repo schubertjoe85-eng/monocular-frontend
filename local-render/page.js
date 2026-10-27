@@ -729,6 +729,7 @@ window.__mono = {
   setMap(meters, b64) { if (!siteInfo) return; if (meters > 300) mapWide = b64; else mapNear = b64; traced = null; nbFoot = null; buildNeighbours(); },
   // Screenshot builds only (see SCREENSHOT_MODE in App.js): set the time / clay, orbit the camera, and render.
   demo(o) {
+    if (o.nudges && modelRoot) { setMove(true); for (const [ax, sign] of o.nudges) nudge(ax, sign); }
     if (o.hours != null) { hours = o.hours; $("time").value = o.hours; applySun(); }
     if (o.clay != null) { clayOn = !!o.clay; applyClay(); }
     if (o.windows && sketchParams) { let n = 0; while (sketchParams.windowType !== o.windows && n++ < 4) cycleWindows(); }

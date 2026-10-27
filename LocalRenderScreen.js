@@ -35,7 +35,8 @@ export default function LocalRenderScreen({ site, address = "", onSiteFound, onR
   const [error, setError] = useState("");
   const [addr, setAddr] = useState(address);
   const [finding, setFinding] = useState(false);
-  const [sketchHelp, setSketchHelp] = useState(false);
+  const [sketchHelp, setSketchHelp] = useState(demo && demo.showHelp ? demo.showHelp : false);
+  const demoElevDone = useRef(false);
 
   const inject = js => webRef.current && webRef.current.injectJavaScript(js + "\ntrue;");
 
@@ -166,7 +167,9 @@ export default function LocalRenderScreen({ site, address = "", onSiteFound, onR
     } else if (msg.type === "pickElevation") {
       pickSketch("elevation");
     } else if (msg.type === "sketchRead" && demo && !msg.error) {
-      inject(`window.__mono.demo(${JSON.stringify(demo)});`);
+      // screenshot builds: a plan, then its elevation if one is given, then the demo view
+      if (demo.elevation && !demoElevDone.current) { demoElevDone.current = true; buildSketch(demo.elevation, "the elevation", "elevation"); }
+      else inject(`window.__mono.demo(${JSON.stringify(demo)});`);
     } else if (msg.type === "result" && msg.dataUrl) {
       if (demo && demo.stayOpen) return;
       try {

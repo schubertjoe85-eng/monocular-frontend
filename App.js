@@ -170,7 +170,7 @@ export default function App() {
       if (shot.address) { setSiteAddress(shot.address); siteAddressRef.current = shot.address; await handleFindAddress(); }
       if (shot.screen === "settings") { openSettings(); if (shot.keys) setKeyDraft(shot.keys); }
       if (shot.screen === "local") {
-        setShotDemo({ ...(shot.local || {}), ...(shot.sketch ? { sketch: dir + shot.sketch } : { uri: dir + shot.model, name: shot.model }) });
+        setShotDemo({ ...(shot.local || {}), ...(shot.sketch ? { sketch: dir + shot.sketch, ...(shot.elevation ? { elevation: dir + shot.elevation } : {}) } : { uri: dir + shot.model, name: shot.model }) });
         setShowLocalRender(true);
       }
     } catch (e) {
