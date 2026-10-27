@@ -1375,6 +1375,139 @@ export function interpretSketch(vision, current = {}, opts = {}){
   return { params: { shape: "sketch", sketch: sk, width: widthOut, depth: d0 * widthOut / w0, facades, ...(noteRoof ? { roofType: noteRoof } : {}) }, read, assumed, overlay, roofOverlay, blocksPx: blocks.map(b => b.px), image: { w: W, h: H } };
 }
 
+/* ---------------- Reading an elevation sketch ----------------
+   A front view of the building drawn on paper: its outline gives the wall height and the roof shape (a peak in the
+   middle is a gable, a flat top with sloped ends a hip, one side higher a skillion), the rectangles inside it are the
+   windows (rows of them are the storeys), and words are read as on a plan ("3 st", "24m" under it, "7m" beside it).
+   With no length written, it's scaled to the width of the model already built. It sets the building-wide settings:
+   storeys, floor to floor, roof shape and pitch, and the windows. */
+export function interpretElevation(vision, current = {}){
+  if (!vision || !vision.ok) return { error: (vision && vision.error) || "The sketch couldn't be read." };
+  const W = vision.w, H = vision.h, big = Math.max(W, H), read = [], assumed = [];
+  const touches = q => q.some(([x, y]) => x < W * 0.012 || y < H * 0.012 || x > W * 0.988 || y > H * 0.988);
+  const bbox = q => { const xs = q.map(p => p[0]), ys = q.map(p => p[1]); return [Math.min(...xs), Math.min(...ys), Math.max(...xs), Math.max(...ys)]; };
+  const cs = (vision.contours || []).map(c => ({ q: c.pts, A: Math.abs(shoelace(c.pts)), bb: bbox(c.pts) }))
+    .filter(c => !touches(c.q) && c.A > big * big * 0.0004).sort((a, b) => b.A - a.A);
+  // each pen line is traced twice (its outside and inside): keep one outline per drawn shape, the inside one
+  const used = new Set(), shapes = [];
+  for (const Y of cs) {
+    if (used.has(Y)) continue;
+    used.add(Y);
+    const gap = Math.max(big * 0.03, 0.3 * Math.sqrt(Y.A));
+    const X = cs.find(X => !used.has(X) && X.A < Y.A && X.bb[0] >= Y.bb[0] && X.bb[1] >= Y.bb[1] && X.bb[2] <= Y.bb[2] && X.bb[3] <= Y.bb[3]
+      && Math.sqrt(Y.A) - Math.sqrt(X.A) < gap && insidePoly(Y.q, X.q[0]));
+    if (X) used.add(X);
+    const q = dpSimplify((X || Y).q, big * 0.004);
+    // sizes are measured to the middle of the pen line: halfway between its outside and inside traces
+    const bb = X ? Y.bb.map((v, i) => (v + X.bb[i]) / 2) : bbox(q);
+    shapes.push({ q, A: Math.abs(shoelace(q)), bb });
+  }
+  if (!shapes.length) return { error: "No closed outline was found. Draw the elevation as a closed shape in dark pen on plain paper, ground line along the bottom." };
+  shapes.sort((a, b) => b.A - a.A);
+  const out = shapes[0], [x0, y0, x1, y1] = out.bb, Wpx = x1 - x0;
+  const [ix0, , ix1, iy1] = bbox(out.q), iW = ix1 - ix0, line = Math.max(0, Wpx - iW);   // the traced (inside) edge, and the pen width
+  const wins = shapes.slice(1).filter(s => s.A < out.A * 0.3 && insidePoly(out.q, [(s.bb[0] + s.bb[2]) / 2, (s.bb[1] + s.bb[3]) / 2]));
+
+  // the top of the outline across its width (image y grows downward; heights are measured up from the bottom)
+  const topAt = x => {
+    let t = Infinity;
+    for (let i = 0; i < out.q.length; i++) {
+      const A = out.q[i], B = out.q[(i + 1) % out.q.length];
+      if ((A[0] - x) * (B[0] - x) > 0 || A[0] === B[0]) continue;
+      t = Math.min(t, A[1] + (B[1] - A[1]) * (x - A[0]) / (B[0] - A[0]));
+    }
+    return Number.isFinite(t) ? iy1 - t + line : 0;   // to the middle of the lines, as the other sizes
+  };
+  const N = 40, prof = Array.from({ length: N + 1 }, (_, i) => topAt(ix0 + iW * (0.02 + 0.96 * i / N)));
+  const hL = prof[0], hR = prof[N], hMax = Math.max(...prof), eaveLo = Math.min(hL, hR), tol = Wpx * 0.035;
+  const high = prof.map(h => h > hMax - tol), firstHigh = high.indexOf(true), lastHigh = high.lastIndexOf(true), ridgeFrac = (lastHigh - firstHigh) / N;
+  let roofType = "flat", rise = 0, eavePx = (hL + hR) / 2;
+  if (hMax - eaveLo < tol) { roofType = "flat"; eavePx = (hL + hR) / 2; }
+  else if (Math.abs(hL - hR) < tol && firstHigh > N * 0.08 && lastHigh < N * 0.92) {
+    eavePx = (hL + hR) / 2; rise = hMax - eavePx;
+    roofType = ridgeFrac > 0.12 ? "hip" : "gable";
+  } else { roofType = "mono"; eavePx = eaveLo; rise = Math.abs(hL - hR); }
+  const run = roofType === "mono" ? Wpx : roofType === "hip" ? Wpx * (1 - ridgeFrac) / 2 : Wpx / 2;
+  const pitch = rise > 0 ? Math.atan2(rise, run) * 180 / Math.PI : null;
+
+  // words: storeys anywhere, a length under or over the drawing is its width, one beside it is the wall height
+  const texts = (vision.texts || []).map(t => ({ s: t.s, box: t.box, c: [t.box[0] + t.box[2] / 2, t.box[1] + t.box[3] / 2], r: readLabel(t.s) }));
+  let k = null, nText = null;
+  for (const t of texts) {
+    if (t.r.storeys != null && nText == null) { nText = t.r.storeys; read.push(`“${t.s.trim()}” as ${nText} storey${nText > 1 ? "s" : ""}`); }
+    const m = t.r.length ?? (t.r.height != null ? t.r.height : (t.r.bare != null && t.r.bare >= 2 ? t.r.bare : null));
+    if (m == null || k != null) continue;
+    const beside = t.c[0] < x0 || t.c[0] > x1, under = t.c[1] > y1 || t.c[1] < y0;
+    if (t.r.height != null || (beside && !under)) { k = m / eavePx; read.push(`“${t.s.trim()}” as the wall height`); }
+    else if (under) { k = m / Wpx; read.push(`“${t.s.trim()}” as the width`); }
+  }
+  const wroteRoof = roofFromNote(texts.map(t => t.s).join(" "));
+  if (wroteRoof) { roofType = wroteRoof; read.push(`the roof written as ${wroteRoof === "mono" ? "skillion" : wroteRoof}`); }
+  if (k == null) {
+    const w = current.width || DEFAULTS.width;
+    k = w / Wpx; assumed.push(`no length written, so it's taken as ${w.toFixed(1)} m wide, the width of the model`);
+  }
+
+  // window rows are the storeys
+  const wm = wins.map(s => ({ x: (s.bb[0] + s.bb[2]) / 2 * k, w: (s.bb[2] - s.bb[0]) * k, h: (s.bb[3] - s.bb[1]) * k, bot: (y1 - s.bb[3]) * k, top: (y1 - s.bb[1]) * k }));
+  const med = a => { const b = a.slice().sort((x, y) => x - y); return b.length ? b[b.length >> 1] : null; };
+  const rows = [];
+  for (const w of wm.slice().sort((a, b) => a.bot - b.bot)) {
+    const r = rows.find(r => Math.abs(r.bot - w.bot) < Math.max(0.6, 0.5 * w.h));
+    if (r) r.items.push(w); else rows.push({ bot: w.bot, items: [w] });
+  }
+  const slab = current.slabThickness ?? DEFAULTS.slabThickness, eaveM = eavePx * k;
+  let n = nText ?? (rows.length || null);
+  if (n == null) { n = Math.max(1, Math.round(eaveM / (current.storeyHeight || DEFAULTS.storeyHeight))); assumed.push(`no windows or storeys drawn, so ${n} storey${n > 1 ? "s" : ""} from the height`); }
+  else if (nText == null) read.push(`${n} row${n > 1 ? "s" : ""} of windows as ${n} storey${n > 1 ? "s" : ""}`);
+  const storeyHeight = Math.min(6, Math.max(2.4, (eaveM - slab) / n));
+  read.push(`walls ${eaveM.toFixed(1)} m high, ${storeyHeight.toFixed(2)} m floor to floor`);
+  read.push(roofType === "flat" ? "a flat roof" : `a ${roofType === "mono" ? "skillion" : roofType} roof` + (pitch != null && !wroteRoof ? ` at ${Math.round(pitch)}°` : ""));
+
+  const P = { storeys: n, storeyHeight: +storeyHeight.toFixed(3), roofType };
+  if (pitch != null && roofType !== "flat") P.roofPitchDeg = Math.round(Math.min(60, Math.max(3, pitch)));
+  const facadeW = Wpx * k;
+  if (wm.length) {
+    const win = wm.filter(w => w.bot > 0.2);   // ones standing on the ground are doors
+    const glassFrac = wm.reduce((s, w) => s + w.w * w.h, 0) / (facadeW * eaveM);
+    const ww = med((win.length ? win : wm).map(w => w.w)), wh = med((win.length ? win : wm).map(w => w.h));
+    if (glassFrac > 0.55) { P.windowType = "curtain"; read.push("glass over most of the face as curtain wall"); }
+    else if (ww > facadeW * 0.45) { P.windowType = "ribbon"; P.windowHeight = +wh.toFixed(2); read.push("windows running across the face as ribbon windows"); }
+    else {
+      P.windowType = "punched"; P.windowWidth = +ww.toFixed(2); P.windowHeight = +wh.toFixed(2);
+      const gaps = rows.flatMap(r => { const xs = r.items.map(w => w.x).sort((a, b) => a - b); return xs.slice(1).map((x, i) => x - xs[i]); }).filter(g => g > ww * 1.05);
+      if (gaps.length) P.windowPitch = +med(gaps).toFixed(2);
+      read.push(`${wm.length} window${wm.length > 1 ? "s" : ""}, about ${ww.toFixed(1)} × ${wh.toFixed(1)} m` + (P.windowPitch ? `, ${P.windowPitch} m apart` : ""));
+    }
+    if (win.length && P.windowType !== "curtain") {
+      const sill = med(win.map(w => w.bot - Math.floor((w.bot + 0.05) / storeyHeight) * storeyHeight));
+      if (sill != null && sill >= 0 && sill < storeyHeight - 0.3) P.sillHeight = +sill.toFixed(2);
+    }
+  } else { P.windowType = "none"; assumed.push("no windows drawn, so the walls have none"); }
+
+  const overlay = [{ pts: out.q, holes: wins.map(w => w.q), label: "E" }];
+  return { params: P, read, assumed, overlay, roofOverlay: [], image: { w: W, h: H }, widthM: facadeW };
+}
+
+/** The settings read off an elevation, applied to the building: storeys go onto a sketched building's main block
+ *  (when there's one; several keep their own), and the roof replaces any roof shape read off the plan. */
+export function applyElevation(p, e){
+  const out = { ...p, ...e };
+  // windows drawn on the elevation go into the walls the plan drew bold (solid); walls it drew as glass stay glass
+  if (e.windowType && e.windowType !== "none" && p.facades)
+    out.facades = Object.fromEntries(Object.entries(p.facades).filter(([, f]) => f.windowType !== "none"));
+  const sk = p.shape === "sketch" && p.sketch && p.sketch.blocks;
+  if (sk) {
+    const mains = sk.filter(b => b.parent == null && !b.fromAbove);
+    out.sketch = { ...p.sketch, blocks: sk.map(b => ({
+      ...b,
+      ...(mains.length === 1 && b === mains[0] && e.storeys ? { storeys: e.storeys } : {}),
+      ...(b.roof && e.roofType ? { roof: { ...b.roof, type: null } } : {}),
+    })) };
+  }
+  return out;
+}
+
 /* ---------------- Interior: internal walls, doors, openings, stairs, cores, columns ----------------
    Stored with the building as p.interior (plan metres, the built group's own x/z), so it rebuilds with the shell.
    Every item has the floors it stands on: lv = [from, to] (absolute storey indices), or null for every floor of

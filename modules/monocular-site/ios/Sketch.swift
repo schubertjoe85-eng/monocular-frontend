@@ -129,6 +129,18 @@ func readSketchJSON(path: String) -> String {
         // a dash stands clear of the drawn lines; a short bit right beside a long line is part of that line's drawing
         let r = max(3, big / 250)
         for c in candidates {
+            // a small closed loop (a window drawn on an elevation) isn't a dash: its middle is clear, with ink all round
+            let mx = (c.box.0 + c.box.2) / 2, my = (c.box.1 + c.box.3) / 2
+            if c.box.2 - c.box.0 > 6 && c.box.3 - c.box.1 > 6 {
+                let mem = Set(c.members)
+                let hit = { (dx: Int, dy: Int) -> Bool in
+                    var x = mx, y = my
+                    while x >= c.box.0 && x <= c.box.2 && y >= c.box.1 && y <= c.box.3 { if mem.contains(y * W + x) { return true }; x += dx; y += dy }
+                    return false
+                }
+                let clear = !(max(c.box.1, my - 2)...min(c.box.3, my + 2)).contains { y in (max(c.box.0, mx - 2)...min(c.box.2, mx + 2)).contains { mem.contains(y * W + $0) } }
+                if clear && hit(1, 0) && hit(-1, 0) && hit(0, 1) && hit(0, -1) { continue }
+            }
             var alone = true
             outer: for y in max(0, c.box.1 - r)...min(H - 1, c.box.3 + r) {
                 for x in max(0, c.box.0 - r)...min(W - 1, c.box.2 + r) {
@@ -261,7 +273,8 @@ func readSketchJSON(path: String) -> String {
         let pts = s.normalizedPoints.map { [Double(Int(Double($0.x) * Double(W) * 10)) / 10, Double(Int((1 - Double($0.y)) * Double(H) * 10)) / 10] }
         var a = 0.0
         for i in 0..<pts.count { let p = pts[i], q = pts[(i + 1) % pts.count]; a += p[0] * q[1] - q[0] * p[1] }
-        if abs(a) / 2 < minArea || pts.count < 3 { return }   // too small to be a building; its children are smaller still
+        // too small to be a building (its children are smaller still); inside one, windows on an elevation can be smaller
+        if abs(a) / 2 < (depth == 0 ? minArea : minArea * 0.2) || pts.count < 3 { return }
         let id = contours.count
         contours.append(["id": id, "parent": parent, "depth": depth, "pts": pts])
         for ch in c.childContours { walk(ch, parent: id, depth: depth + 1) }

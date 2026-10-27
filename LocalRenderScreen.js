@@ -96,35 +96,35 @@ export default function LocalRenderScreen({ site, address = "", onSiteFound, onR
 
   // Sketch -> model, all on the phone: Apple Vision reads the photo (the desktop's reader), the desktop's
   // builder in the renderer page turns the reading into the 3D model.
-  async function buildSketch(uri, name) {
+  async function buildSketch(uri, name, kind = "plan") {
     setSending(true);
     setError("");
     try {
       const json = await readSketch(uri);
       inject("window.__mono.sketchBegin();");
       for (let i = 0; i < json.length; i += CHUNK) inject(`window.__mono.sketchChunk(${JSON.stringify(json.slice(i, i + CHUNK))});`);
-      inject(`window.__mono.sketchEnd(${JSON.stringify(name)});`);
+      inject(`window.__mono.sketchEnd(${JSON.stringify(name)}, ${JSON.stringify(kind)});`);
     } catch (e) {
       setError("Couldn't read the sketch: " + (e.message || e));
     } finally {
       setSending(false);
     }
   }
-  async function photographSketch(useCamera) {
+  async function photographSketch(useCamera, kind = "plan") {
     try {
       const perm = useCamera ? await ImagePicker.requestCameraPermissionsAsync() : await ImagePicker.requestMediaLibraryPermissionsAsync();
       if (!perm.granted) { setError(useCamera ? "Camera permission is needed to photograph a sketch." : "Photos permission is needed to pick a sketch."); return; }
       const opts = { mediaTypes: ImagePicker.MediaTypeOptions.Images, quality: 1 };
       const r = useCamera ? await ImagePicker.launchCameraAsync(opts) : await ImagePicker.launchImageLibraryAsync(opts);
       if (r.canceled || !r.assets?.length) return;
-      await buildSketch(r.assets[0].uri, useCamera ? "your sketch" : (r.assets[0].fileName || "your sketch"));
+      await buildSketch(r.assets[0].uri, useCamera ? "your sketch" : (r.assets[0].fileName || "your sketch"), kind);
     } catch (e) {
       setError("Couldn't get the sketch photo: " + (e.message || e));
     }
   }
   // The how-to-draw guide (an example sketch with what each mark means), then the camera or the photo library.
-  function pickSketch() { setSketchHelp(true); }
-  function sketchFrom(useCamera) { setSketchHelp(false); setTimeout(() => photographSketch(useCamera), 350); }
+  function pickSketch(kind = "plan") { setSketchHelp(kind); }
+  function sketchFrom(useCamera) { const kind = sketchHelp; setSketchHelp(false); setTimeout(() => photographSketch(useCamera, kind), 350); }
 
   async function pickModel() {
     setError("");
@@ -163,6 +163,8 @@ export default function LocalRenderScreen({ site, address = "", onSiteFound, onR
       pickModel();
     } else if (msg.type === "pickSketch") {
       pickSketch();
+    } else if (msg.type === "pickElevation") {
+      pickSketch("elevation");
     } else if (msg.type === "sketchRead" && demo && !msg.error) {
       inject(`window.__mono.demo(${JSON.stringify(demo)});`);
     } else if (msg.type === "result" && msg.dataUrl) {
@@ -205,10 +207,19 @@ export default function LocalRenderScreen({ site, address = "", onSiteFound, onR
         </TouchableOpacity>
       </View>
       {!!error && <Text style={styles.error}>{error}</Text>}
-      <Modal visible={sketchHelp} animationType="slide" presentationStyle="pageSheet" onRequestClose={() => setSketchHelp(false)}>
+      <Modal visible={!!sketchHelp} animationType="slide" presentationStyle="pageSheet" onRequestClose={() => setSketchHelp(false)}>
         <View style={styles.helpWrap}>
           <ScrollView contentContainerStyle={styles.helpBody}>
-            <Text style={styles.helpTitle}>BUILD FROM A SKETCH</Text>
+            <Text style={styles.helpTitle}>{sketchHelp === "elevation" ? "ADD AN ELEVATION" : "BUILD FROM A SKETCH"}</Text>
+            {sketchHelp === "elevation" ? (<>
+              <Text style={styles.helpText}>Draw the front of the building, ground line along the bottom, then photograph it. It sets the wall height, storeys, roof and windows of the model you built from the plan.</Text>
+              <Image source={require("./assets/images/elevation-guide.jpg")} style={styles.helpImage} resizeMode="contain" />
+              {[
+                ["Outline", "The whole front as one closed shape, roof included: a peak is a gable, one side higher a skillion."],
+                ["Windows", "A rectangle for each. Each row of windows is a storey."],
+                ["Size", "Write the width under it (12m) or the wall height beside it (6m). Or it takes the plan's width."],
+              ].map(([h, t]) => (<Text key={h} style={styles.helpText}><Text style={styles.helpHead}>{h}  </Text>{t}</Text>))}
+            </>) : (<>
             <Text style={styles.helpText}>Draw the plan from above, like this, then photograph it. It's read on this phone.</Text>
             <Image source={require("./assets/images/sketch-guide.jpg")} style={styles.helpImage} resizeMode="contain" />
             {[
@@ -222,10 +233,11 @@ export default function LocalRenderScreen({ site, address = "", onSiteFound, onR
             ].map(([h, t]) => (
               <Text key={h} style={styles.helpText}><Text style={styles.helpHead}>{h}  </Text>{t}</Text>
             ))}
-            <Text style={styles.helpNote}>After it's built you can change the storeys, roof, size and windows with the buttons under the model.</Text>
+            <Text style={styles.helpNote}>After it's built you can change the storeys, roof, size and windows with the buttons under the model, and add an elevation for the heights and windows.</Text>
+            </>)}
           </ScrollView>
           <View style={styles.helpButtons}>
-            <TouchableOpacity style={styles.helpPrimary} onPress={() => sketchFrom(true)}><Text style={styles.closeText}>PHOTOGRAPH A SKETCH</Text></TouchableOpacity>
+            <TouchableOpacity style={styles.helpPrimary} onPress={() => sketchFrom(true)}><Text style={styles.closeText}>{sketchHelp === "elevation" ? "PHOTOGRAPH AN ELEVATION" : "PHOTOGRAPH A SKETCH"}</Text></TouchableOpacity>
             <TouchableOpacity style={styles.helpSecondary} onPress={() => sketchFrom(false)}><Text style={styles.closeText}>CHOOSE A PHOTO</Text></TouchableOpacity>
             <TouchableOpacity style={styles.helpCancel} onPress={() => setSketchHelp(false)}><Text style={styles.helpCancelText}>Cancel</Text></TouchableOpacity>
           </View>

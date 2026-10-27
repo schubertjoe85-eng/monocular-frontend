@@ -584,7 +584,7 @@ function captureView() {
   post({ type: "result", dataUrl: renderer.domElement.toDataURL("image/jpeg", 0.92), samples: 0, clay: clayOn, realSun: !!siteInfo, quick: true });
 }
 function setBusy(b) {
-  for (const id of ["openBtn", "sketchBtn", "winBtn", "clayBtn", "turnBtn", "spinBtn", "moveBtn", "renderBtn", "captureBtn", "time"]) $(id).disabled = b;
+  for (const id of ["openBtn", "sketchBtn", "elevBtn", "winBtn", "clayBtn", "turnBtn", "spinBtn", "moveBtn", "renderBtn", "captureBtn", "time"]) $(id).disabled = b;
 }
 
 /* ---------------- a model built from a photographed sketch (desktop's Builder, on the phone) ---------------- */
@@ -599,7 +599,7 @@ function buildFromSketch(vision, name) {
   sketchParams.roofPitchDeg = PITCH[sketchParams.roofType] ?? sketchParams.roofPitchDeg;
   setModel(Builder.buildModel(sketchParams));
   $("renderBtn").disabled = false; $("captureBtn").disabled = false;
-  $("editRow").hidden = false; showSketchValues();
+  $("editRow").hidden = false; $("elevBtn").hidden = false; showSketchValues();
   const h = Builder.totalHeight(sketchParams);
   // the reader's notes are worded for desktop's panel: here the − / + buttons under the model do that job
   const phone = t => t.replace(/: click the width on the model to set the real size/, ": use SIZE − / + to set the real width").replace(/uses the Storeys field/, "has " + mainStoreys(sketchParams) + " (change it with − / +)");
@@ -628,6 +628,16 @@ function rebuildSketch(changes) {
   showSketchValues();
   status(`${sketchParams.width.toFixed(1)} m × ${sketchParams.depth.toFixed(1)} m, ${mainStoreys(sketchParams)} storey${mainStoreys(sketchParams) > 1 ? "s" : ""}, ${(ROOF_LABEL[sketchParams.roofType] || "").toLowerCase()}, ${Builder.totalHeight(sketchParams).toFixed(1)} m high.`);
 }
+// An elevation photographed after the plan: wall height, storeys, roof and windows for the whole building.
+function applyElevationSketch(vision) {
+  if (!sketchParams) { status("Build the model from a plan sketch first, then add its elevation."); return; }
+  const e = Builder.interpretElevation(vision, sketchParams);
+  if (e.error) { status("Couldn't read the elevation: " + e.error); post({ type: "sketchRead", error: e.error }); return; }
+  const next = Builder.applyElevation(sketchParams, e.params);
+  rebuildSketch(next);
+  status("Elevation: " + e.read.join("; ") + "." + (e.assumed.length ? " Assumed: " + e.assumed.join("; ") + "." : ""));
+  post({ type: "sketchRead", read: e.read, assumed: e.assumed });
+}
 // WINDOWS: the builder's Windows setting for the walls the sketch doesn't mark as glass or solid
 function cycleWindows() { rebuildSketch({ windowType: Builder.cycleWindows(sketchParams.windowType) }); }
 function cycleRoof() {
@@ -650,6 +660,7 @@ function bindUi() {
   $("sketchBtn").onclick = () => post({ type: "pickSketch" });
   $("winBtn").onclick = cycleWindows;
   $("roofBtn").onclick = cycleRoof;
+  $("elevBtn").onclick = () => post({ type: "pickElevation" });
   $("stDown").onclick = () => stepStoreys(-1); $("stUp").onclick = () => stepStoreys(1);
   $("szDown").onclick = () => stepSize(-1); $("szUp").onclick = () => stepSize(1);
   $("clayBtn").onclick = () => { holdFrame = false; clayOn = !clayOn; applyClay(); };
@@ -749,12 +760,12 @@ window.__mono = {
   // Apple Vision's reading of a sketch photo (JSON text, in chunks: it carries line-weight masks)
   sketchBegin() { incomingSketch = []; status("Building the model from the sketch…"); },
   sketchChunk(part) { if (incomingSketch) incomingSketch.push(part); },
-  sketchEnd(name) {
+  sketchEnd(name, kind) {
     const parts = incomingSketch; incomingSketch = null;
-    try { buildFromSketch(JSON.parse(parts.join("")), name || "the sketch"); }
+    try { if (kind === "elevation") applyElevationSketch(JSON.parse(parts.join(""))); else buildFromSketch(JSON.parse(parts.join("")), name || "the sketch"); }
     catch (e) { status("Couldn't build from the sketch: " + (e && e.message)); post({ type: "sketchRead", error: String(e && e.message || e) }); }
   },
-  modelBegin(name) { sketchParams = null; yLift = 0; moved = { x: 0, z: 0 }; $("editRow").hidden = true; incoming = { name, parts: [] }; status("Loading " + name + "…"); },
+  modelBegin(name) { sketchParams = null; yLift = 0; moved = { x: 0, z: 0 }; $("editRow").hidden = true; $("elevBtn").hidden = true; incoming = { name, parts: [] }; status("Loading " + name + "…"); },
   modelChunk(part) { if (incoming) incoming.parts.push(part); },
   async modelEnd() {
     const job = incoming; incoming = null;
