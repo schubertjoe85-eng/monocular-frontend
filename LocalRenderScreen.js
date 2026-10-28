@@ -10,12 +10,12 @@
 // from local-render/ by `npm run build:local-render`) running in a WebView,
 // because the path tracer needs full WebGL 2. Messages:
 //   page -> RN: ready | pickModel | loaded | result { dataUrl } | error
-//   RN -> page: window.__mono.setSite / modelBegin / modelChunk / modelEnd
+//   RN -> page: window.__mono.setSite / modelBegin / modelChunk / modelEnd / drawingsBegin / drawingsChunk / drawingsEnd
 
 import React, { useRef, useState } from "react";
 import { View, Text, TextInput, TouchableOpacity, ActivityIndicator, Image, Modal, ScrollView, StyleSheet } from "react-native";
 import * as ImagePicker from "expo-image-picker";
-import { readSketch } from "./modules/monocular-site";
+import { readSketch, readDrawingSet } from "./modules/monocular-site";
 import { WebView } from "react-native-webview";
 import * as DocumentPicker from "expo-document-picker";
 import * as FileSystem from "expo-file-system";
@@ -127,6 +127,22 @@ export default function LocalRenderScreen({ site, address = "", onSiteFound, onR
   function pickSketch(kind = "plan") { setSketchHelp(kind); }
   function sketchFrom(useCamera) { const kind = sketchHelp; setSketchHelp(false); setTimeout(() => photographSketch(useCamera, kind), 350); }
 
+  // PDF drawing set -> model, all on the phone: the desktop's reader takes the plans' own line work and Apple Vision
+  // reads the sheet titles, scales and levels; the renderer page builds the model from that.
+  async function sendDrawings(uri, name) {
+    setSending(true);
+    try {
+      inject(`window.__mono.drawingsBegin(${JSON.stringify(name)});`);
+      const json = await readDrawingSet(uri);
+      for (let i = 0; i < json.length; i += CHUNK) inject(`window.__mono.drawingsChunk(${JSON.stringify(json.slice(i, i + CHUNK))});`);
+      inject(`window.__mono.drawingsEnd(${JSON.stringify(name)});`);
+    } catch (e) {
+      setError("Couldn't read the drawings: " + (e.message || e));
+    } finally {
+      setSending(false);
+    }
+  }
+
   async function pickModel() {
     setError("");
     try {
@@ -138,7 +154,8 @@ export default function LocalRenderScreen({ site, address = "", onSiteFound, onR
       const asset = result.assets[0];
       const name = asset.name || "model";
       const ext = name.split(".").pop().toLowerCase();
-      if (!MODEL_EXTS.includes(ext)) { setError("Unsupported file. Use .dae, .glb or .obj."); return; }
+      if (ext === "pdf") { await sendDrawings(asset.uri, name); return; }
+      if (!MODEL_EXTS.includes(ext)) { setError("Unsupported file. Use .dae, .glb, .obj or a PDF drawing set."); return; }
       if (asset.size && asset.size > MAX_MODEL_BYTES) { setError("That model is over 80 MB — too large to render on a phone."); return; }
 
       setSending(true);

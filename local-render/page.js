@@ -15,6 +15,7 @@ import { OBJLoader } from "three/addons/loaders/OBJLoader.js";
 import { ColladaLoader } from "three/addons/loaders/ColladaLoader.js";
 import * as Engine from "./engine.js";
 import * as Builder from "./builder.js";
+import * as Drawings from "./drawings.js";
 
 const PHOTO_EXPOSURE = 0.9, RASTER_EXPOSURE = 1.0, RASTER_SUN_GAIN = 2.2;
 const PHOTO_SAMPLES = 120;          // enough to converge on a phone; desktop uses ~150
@@ -84,9 +85,9 @@ function init() {
     if (rendering || holdFrame) return;
     const w = window.innerWidth, h = Math.max(1, window.innerHeight - $("panel").offsetHeight);
     if (w !== lastW || h !== lastH) resize();
-    controls.update(); renderer.render(scene, camera);
+    controls.update(); renderer.render(scene, camera); drawOverlay();
   });
-  status("Open a 3D model (.dae, .glb, .obj) to start.");
+  status("Open a 3D model (.dae, .glb, .obj) or a PDF drawing set, or build one from a SKETCH.");
   post({ type: "ready" });
 }
 
@@ -117,7 +118,7 @@ function applySun() {
   const base = elevDeg > 0 ? 2.7 * Math.pow(day, 0.55) : 0;
   sun.intensity = base * (rendering ? 1 : RASTER_SUN_GAIN);
   sun.color.lerpColors(new THREE.Color(0xff9a4d), new THREE.Color(0xfff4e6), THREE.MathUtils.clamp(elevDeg / 22, 0, 1));
-  sun.castShadow = elevDeg > 0;
+  sun.castShadow = elevDeg > 0 && planCut == null;   // the floors above are cut away in INTERIOR: no shadow from them
   const sc = sun.shadow.camera, sr = Math.max(modelRadius * 2.2, 5);
   sc.left = -sr; sc.right = sr; sc.top = sr; sc.bottom = -sr; sc.near = 0.1; sc.far = r * 2.5; sc.updateProjectionMatrix();
   hemi.intensity = 0.35 + 1.85 * day;
@@ -220,7 +221,8 @@ function setupGround() {
 }
 function applyClay() {
   if (!modelRoot) return;
-  modelRoot.traverse(o => { if (o.isMesh) o.material = clayOn ? CLAY : origMats.get(o); });
+  modelRoot.traverse(o => { if (o.isMesh) o.material = clayOn ? CLAY : origMats.get(o) || o.material; });
+  retintPicked();
   $("clayBtn").classList.toggle("on", clayOn);
 }
 // MOVE: drag the model across the site with one finger (orbit is paused while it's on), like desktop's Move tool.
@@ -235,10 +237,11 @@ function groundPoint(e) {
 }
 function setMove(on) {
   holdFrame = false;
+  if (on && (MOD.on || IN.on)) setTool(null);
   moveOn = !!on && !!modelRoot;
   controls.enabled = !moveOn;
   $("moveBtn").classList.toggle("on", moveOn);
-  $("nudgeRow").hidden = !moveOn;
+  renderToolRows();
   if (moveOn) status("MOVE: drag the model to its place on the site, or move it exactly with X (east), Y (up) and Z (south). Tap MOVE again to orbit.");
   else status(siteStatus() || "");
 }
@@ -262,6 +265,7 @@ const STEPS = [0.01, 0.1, 1, 10];
 let stepI = 1;
 function nudge(ax, sign) {
   if (!modelRoot) return;
+  if (!moveOn && moveSelected(ax, sign)) return;
   holdFrame = false;
   const d = sign * STEPS[stepI];
   if (ax === "y") yLift += d;
@@ -584,7 +588,7 @@ function captureView() {
   post({ type: "result", dataUrl: renderer.domElement.toDataURL("image/jpeg", 0.92), samples: 0, clay: clayOn, realSun: !!siteInfo, quick: true });
 }
 function setBusy(b) {
-  for (const id of ["openBtn", "sketchBtn", "elevBtn", "winBtn", "clayBtn", "turnBtn", "spinBtn", "moveBtn", "renderBtn", "captureBtn", "time"]) $(id).disabled = b;
+  for (const id of ["openBtn", "sketchBtn", "elevBtn", "winBtn", "clayBtn", "turnBtn", "spinBtn", "moveBtn", "renderBtn", "captureBtn", "time", "modBtn", "intBtn"]) $(id).disabled = b;
 }
 
 /* ---------------- a model built from a photographed sketch (desktop's Builder, on the phone) ---------------- */
@@ -596,10 +600,11 @@ function buildFromSketch(vision, name) {
   if (r.error) { status("Couldn't build from the sketch: " + r.error); post({ type: "sketchRead", error: r.error }); return; }
   sketchParams = { ...cur, ...r.params };
   yLift = 0; moved = { x: 0, z: 0 };
+  resetTools();
   sketchParams.roofPitchDeg = PITCH[sketchParams.roofType] ?? sketchParams.roofPitchDeg;
   setModel(Builder.buildModel(sketchParams));
   $("renderBtn").disabled = false; $("captureBtn").disabled = false;
-  $("editRow").hidden = false; $("elevBtn").hidden = false; showSketchValues();
+  $("editRow").hidden = false; $("elevBtn").hidden = false; showSketchValues(); renderToolRows();
   const h = Builder.totalHeight(sketchParams);
   // the reader's notes are worded for desktop's panel: here the − / + buttons under the model do that job
   const phone = t => t.replace(/: click the width on the model to set the real size/, ": use SIZE − / + to set the real width").replace(/uses the Storeys field/, "has " + mainStoreys(sketchParams) + " (change it with − / +)");
@@ -619,12 +624,9 @@ function showSketchValues() {
 // Rebuild the sketch model after a change, keeping where it sits on the site and the view.
 function rebuildSketch(changes) {
   if (!sketchParams || !modelRoot) return;
-  const keepPos = modelRoot.position.clone(), keepRot = modelRoot.rotation.y;
   sketchParams = { ...sketchParams, ...changes };
-  const cam = camera.position.clone(), tgt = controls.target.clone();
-  setModel(Builder.buildModel(sketchParams));
-  modelRoot.position.copy(keepPos); modelRoot.rotation.y = keepRot; placeModel();
-  camera.position.copy(cam); controls.target.copy(tgt); controls.update(); applySun(); buildNeighbours();
+  replaceBuilt();
+  if (IN.on) { IN.level = Math.min(IN.level, Builder.floorCount(sketchParams) - 1); setPlanCut(cutHeight()); renderToolRows(); }
   showSketchValues();
   status(`${sketchParams.width.toFixed(1)} m × ${sketchParams.depth.toFixed(1)} m, ${mainStoreys(sketchParams)} storey${mainStoreys(sketchParams) > 1 ? "s" : ""}, ${(ROOF_LABEL[sketchParams.roofType] || "").toLowerCase()}, ${Builder.totalHeight(sketchParams).toFixed(1)} m high.`);
 }
@@ -654,6 +656,627 @@ function stepSize(d) {
   rebuildSketch({ width: w, depth: sketchParams.depth * w / sketchParams.width });
 }
 
+/* ---------------- Modify, Interior, Snap and building styles (the desktop's tools, on the phone) ---------------- */
+// Parts added by the tools are registered like the model's own (shadows, Clay, both sides drawn).
+function addParts(list) {
+  for (const n of list) n.traverse(m => {
+    if (!m.isMesh) return;
+    m.castShadow = m.receiveShadow = true;
+    (Array.isArray(m.material) ? m.material : [m.material]).forEach(x => { if (x) x.side = THREE.DoubleSide; });
+    origMats.set(m, m.material);
+  });
+  partsChanged();
+}
+function partsChanged() { holdFrame = false; snapCache = new WeakMap(); applyClay(); retintPicked(); placeModel(); }
+const originalMaterial = (mesh, mi) => { const m = origMats.get(mesh) || mesh.material; return Array.isArray(m) ? (m[mi || 0] || m[0]) : m; };
+const built = () => modelRoot && modelRoot.children[0];
+const isUnder = (o, g) => { for (; o; o = o.parent) if (o === g) return true; return false; };
+// Swap the built model for a fresh build of sketchParams, keeping where it sits, the view and everything added since.
+function replaceBuilt() {
+  const obj = built(); if (!obj) return;
+  const group = Builder.buildModel(sketchParams);
+  for (const o of MOD.ops) for (const m of o.res.added || []) if (m.parent) m.parent.remove(m);
+  for (const c of [...obj.children]) { obj.remove(c); c.traverse(m => { if (m.isMesh) { origMats.delete(m); m.geometry && m.geometry.dispose(); } }); }
+  for (const c of [...group.children]) obj.add(c);
+  obj.userData = group.userData;
+  const cam = camera.position.clone(), tgt = controls.target.clone();
+  addParts([obj]);
+  // windows, glazing, doors, verandahs and balustrades go back on, in order, on the wall now at the same spot
+  modelRoot.updateMatrixWorld(true);
+  const keep = [];
+  for (const o of MOD.ops) {
+    const dir = o.dir.clone().normalize(), rc = new THREE.Raycaster(o.hit.point.clone().addScaledVector(dir, -0.5), dir, 0, 1.5);
+    const h = rc.intersectObject(modelRoot, true).find(x => x.object.isMesh && x.face);
+    if (!h) continue;
+    const hit = { ...h, point: o.hit.point.clone() }, r = Builder.applyFaceOp(modelRoot, hit, o.dir, o.opts, o.wallMat);
+    if (!r.ok) continue;
+    o.hit = hit; o.res = r; tagOp(o); addParts(r.added); keep.push(o);
+  }
+  MOD.ops = keep;
+  if (MOD.lastOp && !MOD.ops.includes(MOD.lastOp)) MOD.lastOp = null;
+  camera.position.copy(cam); controls.target.copy(tgt); controls.update(); applySun(); buildNeighbours();
+}
+
+// tap, not drag: a short touch that barely moves
+let tapFrom = null;
+function bindTaps() {
+  const c = renderer.domElement;
+  c.addEventListener("pointerdown", e => { tapFrom = { x: e.clientX, y: e.clientY, t: Date.now() }; });
+  c.addEventListener("pointerup", e => {
+    const t = tapFrom; tapFrom = null;
+    if (!t || moveOn || rendering || Math.hypot(e.clientX - t.x, e.clientY - t.y) > 10 || Date.now() - t.t > 450) return;
+    if (MOD.on) onModifyTap(e); else if (IN.on) onInteriorTap(e);
+  });
+}
+function rayAt(e) {
+  const r = renderer.domElement.getBoundingClientRect();
+  ndc.set(((e.clientX - r.left) / r.width) * 2 - 1, -((e.clientY - r.top) / r.height) * 2 + 1);
+  ray.setFromCamera(ndc, camera);
+  return { px: { x: e.clientX - r.left, y: e.clientY - r.top } };
+}
+function hitAt() {
+  if (!modelRoot) return null;
+  const hits = ray.intersectObject(modelRoot, true).filter(h => h.object.isMesh && h.object.visible && h.face);
+  return hits[0] || null;
+}
+function worldToScreen(v) {
+  const q = v.clone().project(camera), w = renderer.domElement.clientWidth, h = renderer.domElement.clientHeight;
+  return { x: (q.x + 1) / 2 * w, y: (1 - q.y) / 2 * h, visible: q.z > -1 && q.z < 1 };
+}
+
+// ---- Snap, like ArchiCAD's special snap points: a tap near an end, midpoint, edge or centre lands exactly on it
+const SNAPS = { on: true };
+let snapCache = new WeakMap();
+function featureEdges(mesh) {   // a mesh's real edges (creases over 25°), not the diagonals of its triangles
+  let e = snapCache.get(mesh);
+  if (!e) { const g = new THREE.EdgesGeometry(mesh.geometry, 25); e = g.attributes.position.array; g.dispose(); snapCache.set(mesh, e); }
+  return e;
+}
+function findSnap(hit, px) {
+  if (!SNAPS.on || !modelRoot) return null;
+  const found = [], TOL = 26;   // a fingertip, in screen points
+  const add = (v, kind, extra = 0) => { const sp = worldToScreen(v); if (sp.visible) { const d = Math.hypot(sp.x - px.x, sp.y - px.y); if (d < TOL) found.push({ p: v, kind, d: d + extra, sp }); } };
+  for (const c of modelRoot.children) if (c.userData.element) {
+    const e = c.userData.element;
+    for (const q of Builder.elementSnapPoints(e)) add(modelRoot.localToWorld(new THREE.Vector3(q[0], q[1], q[2])), "End");
+    add(modelRoot.localToWorld(new THREE.Vector3(e.x, e.y + (e.kind === "column" || e.kind === "wall" ? e.height : e.thickness || 0), e.z)), "Centre", 2);
+  }
+  if (hit) {
+    const m = hit.object, pos = featureEdges(m), A = new THREE.Vector3(), B = new THREE.Vector3(), hp = hit.point;
+    m.updateMatrixWorld();
+    for (let i = 0; i < pos.length; i += 6) {
+      A.set(pos[i], pos[i + 1], pos[i + 2]).applyMatrix4(m.matrixWorld); B.set(pos[i + 3], pos[i + 4], pos[i + 5]).applyMatrix4(m.matrixWorld);
+      if (A.distanceTo(hp) > 10 && B.distanceTo(hp) > 10) continue;
+      add(A.clone(), "End"); add(B.clone(), "End");
+      add(A.clone().add(B).multiplyScalar(0.5), "Mid", 2);
+      const sa = worldToScreen(A), sb = worldToScreen(B); if (!sa.visible || !sb.visible) continue;
+      const dx = sb.x - sa.x, dy = sb.y - sa.y, t = Math.max(0, Math.min(1, ((px.x - sa.x) * dx + (px.y - sa.y) * dy) / (dx * dx + dy * dy || 1)));
+      const d = Math.hypot(sa.x + dx * t - px.x, sa.y + dy * t - px.y);
+      if (d < 14) found.push({ p: A.clone().lerp(B, t), kind: "Edge", d: d + 10, sp: { x: sa.x + dx * t, y: sa.y + dy * t } });   // points win over edges
+    }
+    const c = new THREE.Box3().setFromObject(m).getCenter(new THREE.Vector3());
+    if (Math.abs(hit.face.normal.clone().transformDirection(m.matrixWorld).y) > 0.9) c.y = hp.y;
+    add(c, "Centre", 4);
+  }
+  if (!found.length) return null;
+  return found.sort((a, b) => a.d - b.d)[0];
+}
+let snapTimer = 0;
+function showSnap(s) {
+  const el = $("snapMark"); clearTimeout(snapTimer);
+  if (!s) { el.hidden = true; return; }
+  el.hidden = false; el.style.left = s.sp.x + "px"; el.style.top = s.sp.y + "px"; el.querySelector("b").textContent = s.kind;
+  snapTimer = setTimeout(() => { el.hidden = true; }, 1600);
+}
+
+// ---- Modify: doors, windows, glazing, verandahs, balustrades, columns, slabs and walls on any model; select, move, delete
+const MOD = { on: false, mode: "select", door: "single", flip: false, bal: "glass", col: "square", ops: [], undo: [], lastOp: null, element: null, picked: null };
+const MOD_MODES = [["select", "SELECT"], ["door", "DOOR"], ["windows", "WINDOWS"], ["curtain", "GLAZE"], ["verandah", "VERANDAH"], ["balustrade", "BALUSTRADE"], ["column", "COLUMN"], ["slab", "SLAB"], ["wall", "WALL"], ["remove", "REMOVE"]];
+const MOD_HINT = {
+  select: "Tap any part: it turns blue. DELETE removes it, X / Y / Z move it.",
+  door: "Pick a style, then tap a wall where the door goes. FLIP swaps its side.",
+  windows: "Tap a flat wall to cut windows through it, sized per storey.",
+  curtain: "Tap a flat wall to replace it with glazing and mullions.",
+  verandah: "Tap a wall: a verandah runs its whole length at that floor, with a deck, posts and a skillion roof.",
+  balustrade: "Pick a style, then tap the top of a deck, balcony or slab near the edge it runs along.",
+  column: "Pick a shape, then tap the ground or a floor. X / Y / Z move it; it snaps to ends and corners.",
+  slab: "Tap the ground or the model to place a slab.",
+  wall: "Tap the ground or a floor to place a wall. Tapping a wall runs the new one along it.",
+  remove: "Tap a part to take it out of the model.",
+};
+const PICK_MAT = new THREE.MeshStandardMaterial({ color: 0x4a8cff, emissive: 0x1b3f99, emissiveIntensity: 0.6, roughness: 0.6 });
+function pickPart(obj) {
+  if (MOD.picked) MOD.picked.traverse(m => { if (m.isMesh && m.userData._pick) { m.material = clayOn ? CLAY : origMats.get(m) || m.material; delete m.userData._pick; } });
+  MOD.picked = obj || null;
+  if (obj) { MOD.element = null; MOD.lastOp = null; obj.traverse(m => { if (m.isMesh) { m.userData._pick = true; m.material = PICK_MAT; } }); }
+  holdFrame = false;
+}
+function retintPicked() { if (MOD.picked) MOD.picked.traverse(m => { if (m.isMesh && m.userData._pick) m.material = PICK_MAT; }); }
+const opName = op => ({ curtain: "glazing", door: "door", verandah: "verandah", balustrade: "balustrade" }[op.opts.mode] || "windows");
+function modOpts() {
+  const D = Builder.DEFAULTS;
+  return { windowWidth: D.windowWidth, windowHeight: D.windowHeight, sillHeight: D.sillHeight, windowPitch: D.windowPitch, storeyHeight: sketchParams ? sketchParams.storeyHeight : D.storeyHeight,
+    doorStyle: MOD.door, doorFlip: MOD.flip, balustradeStyle: MOD.bal };
+}
+function tagOp(op) { for (const m of op.res.added || []) m.traverse(x => { x.userData.op = op; }); }
+// Face edits are kept in order, each cut into what the ones before it left: to change or delete one, the ones after it
+// come off, it's redone (or left out), and they go back on in order.
+function rerunFrom(i, apply) {
+  const ops = MOD.ops;
+  for (let j = ops.length - 1; j >= i; j--) ops[j].res.undo();
+  const ok = apply();
+  for (let j = i; j < ops.length; j++) {
+    const o = ops[j]; if (o.skip) continue;
+    const r = Builder.applyFaceOp(modelRoot, o.hit, o.dir, o.opts, o.wallMat);
+    if (r.ok) { o.res = r; tagOp(o); addParts(r.added); } else o.res = { undo() {}, added: [] };
+  }
+  partsChanged(); return ok;
+}
+function editOp(op, patch, shift) {
+  const i = MOD.ops.indexOf(op); if (i < 0) return;
+  const before = { ...op.opts }, beforePt = op.hit.point.clone(); let msg = null, ok = true;
+  rerunFrom(i, () => {
+    Object.assign(op.opts, patch); if (shift) op.hit.point.add(shift);
+    op.skip = true;
+    let r = Builder.applyFaceOp(modelRoot, op.hit, op.dir, op.opts, op.wallMat);
+    if (!r.ok) { msg = r.message; ok = false; Object.assign(op.opts, before); op.hit.point.copy(beforePt); r = Builder.applyFaceOp(modelRoot, op.hit, op.dir, op.opts, op.wallMat); }
+    op.res = r; tagOp(op); addParts(r.added || []);
+    if (ok) msg = r.message;
+    return ok;
+  });
+  delete op.skip;
+  status(msg || "");
+}
+function removeOp(op, withUndo) {
+  const i = MOD.ops.indexOf(op); if (i < 0) return;
+  rerunFrom(i, () => { MOD.ops.splice(i, 1); return true; });
+  if (MOD.lastOp === op) MOD.lastOp = null;
+  if (withUndo) { MOD.undo.push(() => rerunFrom(Math.min(i, MOD.ops.length), () => { MOD.ops.splice(i, 0, op); return true; })); status(`Deleted the ${opName(op)}. UNDO brings it back.`); }
+}
+// ---- slabs, walls and columns added here: they connect at their ends and corners
+const SNAP_M = 0.2;
+function snapTargets(except) {
+  const out = [];
+  for (const c of modelRoot.children) if (c.userData.element && c !== except) for (const q of Builder.elementSnapPoints(c.userData.element)) out.push({ q, what: "the " + c.userData.element.kind });
+  return out;
+}
+function nearestTarget(p, targets, tol = SNAP_M) {
+  let best = null;
+  for (const t of targets) {
+    const d = Math.hypot(t.q[0] - p[0], t.q[1] - p[1], t.q[2] - p[2]), score = d + (p[3] && t.q[3] !== p[3] ? 0.05 : 0);
+    if (d < tol && (!best || score < best.score)) best = { ...t, d, score };
+  }
+  return best;
+}
+function updateElement(mesh, patch) {
+  const spec = Builder.clampElement({ ...mesh.userData.element, ...patch });
+  mesh.userData.element = spec; mesh.geometry.dispose(); mesh.geometry = Builder.elementGeometry(spec);
+  snapCache = new WeakMap(); holdFrame = false;
+}
+function snapElement(mesh) {
+  const e = mesh.userData.element, targets = snapTargets(mesh); let best = null;
+  for (const p of Builder.elementSnapPoints(e)) { const t = nearestTarget(p, targets); if (t && (!best || t.score < best.t.score)) best = { p, t }; }
+  if (!best || best.t.d < 1e-4) return null;
+  updateElement(mesh, { x: +(e.x + best.t.q[0] - best.p[0]).toFixed(4), y: +(e.y + best.t.q[1] - best.p[1]).toFixed(4), z: +(e.z + best.t.q[2] - best.p[2]).toFixed(4) });
+  return best.t.what;
+}
+function removeElement(mesh) {
+  const root = mesh.parent; if (!root) return;
+  root.remove(mesh); MOD.element = null;
+  MOD.undo.push(() => { root.add(mesh); partsChanged(); });
+  partsChanged(); status(`Removed the ${mesh.userData.element.kind}. UNDO brings it back.`);
+}
+function deleteSelected() {
+  if (IN.on) { removeInteriorSel(); return; }
+  if (MOD.picked && MOD.picked.parent) {
+    const obj = MOD.picked, parent = obj.parent; pickPart(null); parent.remove(obj);
+    MOD.undo.push(() => { parent.add(obj); partsChanged(); });
+    partsChanged(); status(`Deleted “${obj.name || "part"}”. UNDO brings it back.`); return;
+  }
+  if (MOD.element && MOD.element.parent) { removeElement(MOD.element); return; }
+  if (MOD.lastOp) { removeOp(MOD.lastOp, true); return; }
+  status("Tap a part with SELECT first, then DELETE.");
+}
+function undoModify() {
+  if (IN.on) { undoInterior(); return; }
+  const u = MOD.undo.pop();
+  if (!u) { status("Nothing to undo."); return; }
+  u(); partsChanged(); status("Undone.");
+}
+function onModifyTap(e) {
+  const { px } = rayAt(e), mode = MOD.mode;
+  let hit = hitAt();
+  if (mode === "select") {
+    pickPart(null);
+    if (!hit) { status("Tap a part of the model."); return; }
+    if (hit.object.userData.element) { MOD.element = hit.object; MOD.lastOp = null; status(`Selected the ${hit.object.userData.element.kind}. X / Y / Z move it, DELETE removes it.`); return; }
+    const op = hit.object.userData.op;
+    if (op && MOD.ops.includes(op)) { MOD.lastOp = op; MOD.element = null; renderToolRows(); status(`Selected the ${opName(op)}. X / Y / Z slide it, DELETE removes it.`); return; }
+    const obj = hit.object.parent && hit.object.parent.userData.unit ? hit.object.parent : hit.object;
+    pickPart(obj); status(`Selected “${obj.name || "part"}”. DELETE removes it, X / Y / Z move it.`);
+    return;
+  }
+  // a tap lands on the snap point it was near
+  const snap = mode === "remove" ? null : findSnap(hit, px);
+  showSnap(snap);
+  if (snap) {
+    if (hit) hit = { ...hit, point: snap.p.clone() };
+    else if (["slab", "wall", "column"].includes(mode)) hit = { point: snap.p.clone(), object: modelRoot, face: null };
+  }
+  const placing = ["slab", "wall", "column"].includes(mode);
+  if (hit && hit.object.userData.element && mode !== "remove" && !(placing && snap)) { MOD.element = hit.object; status(`Selected the ${hit.object.userData.element.kind}. X / Y / Z move it, DELETE removes it.`); return; }
+  const tapped = hit && hit.object.userData.op;
+  if (tapped && MOD.ops.includes(tapped) && mode !== "balustrade") {
+    if (mode === "remove") { removeOp(tapped, true); return; }
+    MOD.lastOp = tapped; MOD.element = null; renderToolRows(); status(`Selected the ${opName(tapped)}. X / Y / Z slide it, DELETE removes it.`); return;
+  }
+  if (placing) {
+    const cam = new THREE.Vector3(); camera.getWorldDirection(cam); cam.y = 0; cam.normalize();
+    const right = new THREE.Vector3().crossVectors(cam, new THREE.Vector3(0, 1, 0)).normalize();
+    let spec = Builder.elementFromClick(mode, modelRoot, hit, ray.ray, right);
+    if (!spec) { status("Tap on the model or the ground."); return; }
+    if (mode === "column") spec = { ...spec, shape: MOD.col };
+    const mesh = new THREE.Mesh(Builder.elementGeometry(spec), Builder.elementMaterial(mode));
+    mesh.name = { slab: "Added slab", wall: "Added wall", column: "Added column" }[mode];
+    mesh.userData.element = spec;
+    modelRoot.add(mesh); addParts([mesh]);
+    const to = snapElement(mesh);
+    MOD.undo.push(() => { modelRoot.remove(mesh); if (MOD.element === mesh) MOD.element = null; });
+    MOD.element = mesh;
+    status(`Added a ${mode === "column" ? Builder.COLUMN_SHAPES[MOD.col].toLowerCase() + " column" : mode}${snap ? `, on the ${snap.kind.toLowerCase()} point` : to ? `, snapped to ${to}` : ""}. X / Y / Z move it.`);
+    return;
+  }
+  if (!hit) { status("Tap a part of the model."); return; }
+  if (mode === "remove") {
+    if (hit.object.userData.element) { removeElement(hit.object); return; }
+    const r = Builder.removePart(hit);
+    if (!r.ok) { status(r.message); return; }
+    MOD.undo.push(r.undo); partsChanged(); status(r.message + " UNDO puts it back.");
+    return;
+  }
+  // a door on a model built here goes in as one of its own doors (it replaces windows in the way and rebuilds with it)
+  if (mode === "door" && sketchParams && isUnder(hit.object, built())) {
+    const P = sketchParams, lp = built().worldToLocal(hit.point.clone()), L = Math.max(0, Math.min(Builder.floorCount(P) - 1, Math.floor((lp.y - P.slabThickness + 0.05) / P.storeyHeight)));
+    const ds = Builder.DOOR_STYLES[MOD.door], d = Builder.doorFromClick(P, L, [lp.x, lp.z], 0.6, "door", { w: ds.w, h: ds.h, outsideOnly: true });
+    if (!d) { status("Tap an outside wall of the building to put a door in it."); return; }
+    const it = { id: newId(), kind: "door", host: d.host, u: d.u, w: d.w, h: d.h, swing: MOD.flip ? -1 : 1, lv: [L, L], style: MOD.door };
+    commitInterior([...intItems(), it], `Added ${/^[aeiou]/i.test(ds.label) ? "an" : "a"} ${ds.label.toLowerCase()} door on the ${Builder.levelName(L).toLowerCase()}. In INTERIOR you can select it to restyle, flip or move it.`);
+    return;
+  }
+  const opts = { mode: ["curtain", "door", "verandah", "balustrade"].includes(mode) ? mode : "windows", ...modOpts() };
+  const wallMat = originalMaterial(hit.object, hit.face && hit.face.materialIndex);
+  const res = Builder.applyFaceOp(modelRoot, hit, ray.ray.direction, opts, wallMat);
+  if (!res.ok) { status(res.message); return; }
+  addParts(res.added);
+  const op = { hit, dir: ray.ray.direction.clone(), opts, res, wallMat };
+  tagOp(op); MOD.ops.push(op);
+  MOD.undo.push(() => removeOp(op, false));
+  MOD.lastOp = op; MOD.element = null;
+  status(res.message);
+}
+// X / Y / Z for the selected part (the step is the same STEP as MOVE)
+function moveSelected(ax, sign) {
+  const d = sign * STEPS[stepI];
+  if (IN.on) { nudgeInterior(ax, d); return true; }
+  if (!MOD.on) return false;
+  const pk = MOD.picked, el = MOD.element && MOD.element.parent ? MOD.element : null, op = MOD.lastOp;
+  if (pk && pk.parent) {
+    const v = new THREE.Vector3(); v[ax] = d;
+    const w0 = modelRoot.localToWorld(new THREE.Vector3()), w1 = modelRoot.localToWorld(v.clone());
+    const dl = pk.parent.worldToLocal(w1).sub(pk.parent.worldToLocal(w0)), before = pk.position.clone();
+    pk.position.add(dl); MOD.undo.push(() => { pk.position.copy(before); });
+    partsChanged(); status(`Moved “${pk.name || "part"}” ${d > 0 ? "+" : ""}${+d.toFixed(3)} m along ${ax.toUpperCase()}.`); return true;
+  }
+  if (el) {
+    const e = el.userData.element, before = { x: e.x, y: e.y, z: e.z };
+    MOD.undo.push(() => updateElement(el, before));
+    updateElement(el, { [ax]: +((+e[ax]) + d).toFixed(3) }); const to = snapElement(el); partsChanged();
+    status(to ? `Snapped to ${to}.` : `Moved the ${e.kind} ${d > 0 ? "+" : ""}${+d.toFixed(3)} m along ${ax.toUpperCase()}.`); return true;
+  }
+  if (op) {
+    const v = new THREE.Vector3(); v[ax] = d;
+    if (op.hit.face) { const n = op.hit.face.normal.clone().transformDirection(op.hit.object.matrixWorld); v.addScaledVector(n, -v.dot(n)); }
+    if (v.length() < 1e-4) { status(`${ax.toUpperCase()} runs straight into that wall. Use one of the other two to slide the ${opName(op)}.`); return true; }
+    editOp(op, {}, v); return true;
+  }
+  status("Tap a part with SELECT first, then move it with X / Y / Z."); return true;
+}
+function flipDoor() {
+  if (IN.on) { const it = selItem(); if (it && it.kind === "door") { replaceItem({ ...it, swing: it.swing === -1 ? 1 : -1 }); status("Flipped the door."); } else status("Select a door to flip it."); return; }
+  MOD.flip = !MOD.flip;
+  if (MOD.lastOp && MOD.lastOp.opts.mode === "door") editOp(MOD.lastOp, { doorFlip: !MOD.lastOp.opts.doorFlip });
+  else status("The next door goes in flipped" + (MOD.flip ? "." : " back."));
+}
+function turnSelected() {
+  if (IN.on) { const it = selItem(); if (it && it.kind !== "wall" && it.kind !== "door" && it.kind !== "opening") replaceItem({ ...it, ang: ((it.ang || 0) + 90) % 360 }); else { IN.ang = (IN.ang + 90) % 360; status(`New stairs and lifts turned ${IN.ang}°.`); } return; }
+  const el = MOD.element && MOD.element.parent ? MOD.element : null;
+  if (el) { updateElement(el, { angleDeg: (el.userData.element.angleDeg || 0) + 15 }); partsChanged(); status("Turned 15°."); }
+  else status("Select a slab, wall or column to turn it.");
+}
+
+// ---- Interior: walls, doors, openings, stairs, lifts and columns, floor by floor, in a plan cut through the floor
+const IN = { on: false, level: 0, mode: "wall", all: false, chain: null, sel: null, ang: 0, undo: [], style: { door: "single", extdoor: "entry", stair: "dogleg", core: "lift" } };
+const INT_MODES = [["select", "SELECT"], ["wall", "WALL"], ["door", "DOOR"], ["extdoor", "EXT DOOR"], ["opening", "OPENING"], ["stair", "STAIR"], ["core", "LIFT"], ["column", "COLUMN"]];
+const INT_HINT = {
+  select: "Tap a wall, door, stair, lift or column to select it. X / Z move it, DELETE removes it.",
+  wall: "Tap to start a wall, tap again for each corner. DONE ends it.",
+  door: "Pick a style, then tap a wall (inside or outside) to put a door in it.",
+  extdoor: "Pick a style, then tap near an outside wall to put a door in it.",
+  opening: "Tap a wall to put an opening (no door) in it.",
+  stair: "Pick a style, then tap to place a stair to the floor above. TURN turns it.",
+  core: "Pick Lift, Glass lift or Services, then tap to place it. It runs through every floor.",
+  column: "Tap to place a column.",
+};
+const intItems = () => (sketchParams && sketchParams.interior) || [];
+const newId = () => Math.random().toString(36).slice(2, 9);
+const selItem = () => IN.sel && intItems().find(x => x.id === IN.sel);
+var planCut = null, savedView = null, sunShadow = null;   // var: the sun reads planCut before this line runs
+function setPlanCut(yModel) {
+  const obj = built();
+  planCut = yModel == null || !obj ? null : obj.localToWorld(new THREE.Vector3(0, yModel, 0)).y;
+  renderer.localClippingEnabled = true;
+  renderer.clippingPlanes = planCut == null ? [] : [new THREE.Plane(new THREE.Vector3(0, -1, 0), planCut)];
+  if (planCut != null) { if (sunShadow == null) sunShadow = sun.castShadow; sun.castShadow = false; }
+  else if (planCut == null && sunShadow != null) { sun.castShadow = sunShadow; sunShadow = null; }
+  holdFrame = false;
+}
+function setTopView(on) {
+  if (on && !savedView) {
+    savedView = { pos: camera.position.clone(), target: controls.target.clone() };
+    const box = new THREE.Box3().setFromObject(built()), c = box.getCenter(new THREE.Vector3()), size = box.getSize(new THREE.Vector3());
+    const vFov = camera.fov * Math.PI / 180, hFov = 2 * Math.atan(Math.tan(vFov / 2) * camera.aspect);
+    const h = Math.max(size.x / Math.tan(hFov / 2), size.z / Math.tan(vFov / 2)) * 0.6 + (planCut ?? box.max.y);
+    controls.target.set(c.x, planCut ?? box.min.y, c.z);
+    camera.position.set(c.x, h, c.z + 0.001); controls.update();
+  } else if (!on && savedView) { camera.position.copy(savedView.pos); controls.target.copy(savedView.target); controls.update(); savedView = null; }
+  holdFrame = false;
+}
+const floorAt = () => { const l = Builder.levelLifts(sketchParams, IN.level); return Builder.floorY(sketchParams, IN.level) + (l.length ? Math.min(...l) : 0); };
+const cutHeight = () => { const l = Builder.levelLifts(sketchParams, IN.level); return Builder.floorY(sketchParams, IN.level) + 1.2 + (l.length ? Math.max(...l) : 0) * 0.5; };
+function planPoint(yModel) {
+  const obj = built(); obj.updateMatrixWorld(true);
+  const inv = new THREE.Matrix4().copy(obj.matrixWorld).invert(), lr = ray.ray.clone().applyMatrix4(inv);
+  const q = lr.intersectPlane(new THREE.Plane(new THREE.Vector3(0, 1, 0), -yModel), new THREE.Vector3());
+  return q ? [q.x, q.z] : null;
+}
+const toScreen = (q, y) => worldToScreen(built().localToWorld(new THREE.Vector3(q[0], y, q[1])));
+function snapTol(pt) {   // metres for a fingertip near a plan point, so snapping feels the same at any zoom
+  const y = floorAt(), a = toScreen(pt, y), b = toScreen([pt[0] + 1, pt[1]], y), px = Math.hypot(b.x - a.x, b.y - a.y);
+  return Math.min(2, Math.max(0.05, 22 / Math.max(px, 1e-3)));
+}
+function setInterior(on) {
+  if (on && !sketchParams) { status("INTERIOR works on a model built here from a sketch. For an imported model or drawings, use MODIFY."); return false; }
+  IN.on = !!on;
+  if (on) {
+    if (moveOn) setMove(false);
+    IN.level = Math.min(IN.level, Builder.floorCount(sketchParams) - 1);
+    setPlanCut(cutHeight()); setTopView(true);
+    status("INTERIOR: plan of the " + Builder.levelName(IN.level).toLowerCase() + ". " + INT_HINT[IN.mode]);
+  } else { IN.chain = null; IN.sel = null; setPlanCut(null); setTopView(false); }
+  return true;
+}
+function changeLevel(d) {
+  const n = Builder.floorCount(sketchParams);
+  IN.level = Math.max(0, Math.min(n - 1, IN.level + d)); IN.chain = null; IN.sel = null;
+  setPlanCut(cutHeight()); renderToolRows();
+  status("Plan of the " + Builder.levelName(IN.level).toLowerCase() + ".");
+}
+function commitInterior(items, msg) {
+  IN.undo.push(JSON.stringify(intItems())); if (IN.undo.length > 100) IN.undo.shift();
+  sketchParams = { ...sketchParams, interior: items };
+  replaceBuilt();
+  if (IN.on) setPlanCut(cutHeight());
+  renderToolRows();
+  if (msg) status(msg);
+}
+function undoInterior() {
+  const s = IN.undo.pop(); if (!s) { status("Nothing to undo."); return; }
+  IN.sel = null; IN.chain = null;
+  sketchParams = { ...sketchParams, interior: JSON.parse(s) }; replaceBuilt(); setPlanCut(cutHeight()); renderToolRows(); status("Undone.");
+}
+function replaceItem(it) { commitInterior(intItems().map(x => x.id === it.id ? it : x)); }
+function removeInteriorSel() {
+  const it = selItem(); if (!it) { status("Tap something with SELECT first, then DELETE."); return; }
+  commitInterior(intItems().filter(x => x.id !== it.id && x.host !== it.id), `Removed the ${it.kind}${it.kind === "wall" ? " and its doors" : ""}. UNDO brings it back.`);
+  IN.sel = null;
+}
+function nudgeInterior(ax, d) {
+  const it = selItem(); if (!it) { status("Tap something with SELECT first, then move it with X / Z."); return; }
+  if (ax === "y") { status("Interior items sit on their floor: use ▼ ▲ for another floor."); return; }
+  const v = ax === "x" ? [d, 0] : [0, d];
+  if (it.kind === "wall") replaceItem({ ...it, a: [it.a[0] + v[0], it.a[1] + v[1]], b: [it.b[0] + v[0], it.b[1] + v[1]] });
+  else if (it.kind === "door" || it.kind === "opening") {
+    const s = Builder.interiorDims(sketchParams, IN.level, it.id).find(q => q.key === "w"), ex = s ? [s.b[0] - s.a[0], s.b[2] - s.a[2]] : [1, 0], L = Math.hypot(...ex) || 1;
+    replaceItem({ ...it, u: it.u + (v[0] * ex[0] + v[1] * ex[1]) / L });
+  } else replaceItem({ ...it, x: +(it.x + v[0]).toFixed(3), z: +(it.z + v[1]).toFixed(3) });
+}
+function onInteriorTap(e) {
+  rayAt(e);
+  const pt = planPoint(floorAt()); if (!pt) return;
+  const tol = snapTol(pt), P = sketchParams, m = IN.mode;
+  if (m === "wall") {
+    const q = Builder.snapPlan(P, IN.level, pt, tol, IN.chain, false).pt;
+    if (!IN.chain) { IN.chain = q; status("Tap the next corner. DONE ends the wall."); return; }
+    const a = IN.chain;
+    if (Math.hypot(q[0] - a[0], q[1] - a[1]) < 0.1) { IN.chain = null; return; }
+    const it = { id: newId(), kind: "wall", a: a.map(v => +v.toFixed(3)), b: q.map(v => +v.toFixed(3)), t: Builder.INTERIOR_DEFAULTS.wall.t, lv: IN.all ? null : [IN.level, IN.level] };
+    commitInterior([...intItems(), it], `Wall ${Math.hypot(q[0] - a[0], q[1] - a[1]).toFixed(2)} m. Keep tapping, or DONE to finish.`);
+    IN.chain = q; return;
+  }
+  if (m === "door" || m === "opening" || m === "extdoor") {
+    const kind = m === "extdoor" ? "door" : m, sk = m === "extdoor" ? IN.style.extdoor : IN.style.door, ds = kind === "door" ? Builder.DOOR_STYLES[sk] : null;
+    const d = Builder.doorFromClick(P, IN.level, pt, tol, kind, { ...(ds ? { w: ds.w, h: ds.h } : {}), outsideOnly: m === "extdoor" });
+    if (d) {
+      const it = { id: newId(), kind, host: d.host, u: d.u, w: d.w, h: d.h, swing: 1, lv: d.outside ? (IN.all ? null : [IN.level, IN.level]) : null, ...(ds ? { style: sk } : {}) };
+      IN.sel = it.id;
+      commitInterior([...intItems(), it], `Added ${kind === "opening" ? "an opening" : `${/^[aeiou]/i.test(ds.label) ? "an" : "a"} ${ds.label.toLowerCase()} door`} in the ${d.outside ? "outside" : "internal"} wall.`);
+      return;
+    }
+    const hitId = Builder.pickInterior(P, IN.level, pt, tol); if (hitId) { IN.sel = hitId; renderToolRows(); return; }
+    status(m === "extdoor" ? "Tap near an outside wall to put a door in it." : "Tap on a wall to put a " + m + " in it."); return;
+  }
+  const hitId = Builder.pickInterior(P, IN.level, pt, tol);
+  if (m === "select" || hitId) { IN.sel = hitId; renderToolRows(); const it = selItem(); status(it ? `Selected the ${it.kind}. X / Z move it, DELETE removes it${it.kind === "door" ? ", FLIP swaps its side" : ""}.` : "Nothing there."); return; }
+  const it = { id: newId(), kind: m, x: +pt[0].toFixed(3), z: +pt[1].toFixed(3), ang: IN.ang, lv: m === "core" || IN.all ? null : [IN.level, IN.level],
+    ...(m === "stair" ? { type: IN.style.stair } : m === "core" ? { style: IN.style.core } : {}) };
+  IN.sel = it.id;
+  commitInterior([...intItems(), it], { stair: `Added ${IN.style.stair === "L" ? "an L-shaped" : "a " + Builder.STAIR_TYPES[IN.style.stair].toLowerCase()} stair to the floor above.`, core: `Added a ${Builder.CORE_STYLES[IN.style.core].toLowerCase()} through every floor.`, column: "Added a column." }[m]);
+}
+// selection and the wall being drawn, over the plan
+function drawOverlay() {
+  const svg = $("overlay");
+  if (!IN.on || !sketchParams || !built()) { if (svg.innerHTML) svg.innerHTML = ""; return; }
+  const P = sketchParams, y = floorAt() + 0.02, S = q => toScreen(q, y);
+  const poly = (q, cls) => { const pts = q.map(S); if (pts.some(p => !p.visible)) return ""; return `<polygon class="${cls}" points="${pts.map(p => p.x + "," + p.y).join(" ")}"/>`; };
+  let out = "";
+  const sel = selItem();
+  if (sel) {
+    if (sel.kind === "door" || sel.kind === "opening") { const ds = Builder.interiorDims(P, IN.level, sel.id).find(d => d.key === "w"); if (ds) out += poly([[ds.a[0], ds.a[2]], [ds.b[0], ds.b[2]]], "sel"); }
+    else out += poly(Builder.itemOutline(P, Builder.clampItem(sel)), "sel");
+  }
+  if (IN.mode === "wall" && IN.chain) { const c = S(IN.chain); if (c.visible) out += `<circle class="snap" cx="${c.x}" cy="${c.y}" r="7"/>`; }
+  svg.innerHTML = out;
+}
+
+// ---- the tool rows under the model
+function setTool(which) {
+  const was = MOD.on ? "modify" : IN.on ? "interior" : null;
+  if (MOD.on) { MOD.on = false; pickPart(null); MOD.element = null; MOD.lastOp = null; showSnap(null); }
+  if (IN.on) setInterior(false);
+  if (which && which !== was) {
+    if (which === "modify") { if (moveOn) setMove(false); MOD.on = true; status("MODIFY: " + MOD_HINT[MOD.mode]); }
+    else if (which === "interior" && !setInterior(true)) which = null;
+  } else if (!which || which === was) status(siteStatus() || "Drag to orbit, pinch to zoom.");
+  renderToolRows();
+}
+function seg(id, list, cur, onPick, extra = []) {
+  const box = $(id);
+  box.innerHTML = list.map(([k, label]) => `<button data-k="${k}" class="${k === cur ? "on" : ""}">${label}</button>`).join("") + extra.map(([k, label]) => `<button data-x="${k}">${label}</button>`).join("");
+  box.querySelectorAll("[data-k]").forEach(b => b.onclick = () => onPick(b.dataset.k));
+  return box;
+}
+const entries = o => Object.entries(o).map(([k, v]) => [k, (typeof v === "string" ? v : v.label).toUpperCase()]);
+function renderToolRows() {
+  const has = !!modelRoot, tool = MOD.on ? "modify" : IN.on ? "interior" : null;
+  $("toolRow").hidden = !has;
+  $("modBtn").classList.toggle("on", MOD.on); $("intBtn").classList.toggle("on", IN.on);
+  $("intBtn").disabled = !sketchParams;
+  $("styleRow").hidden = !sketchParams || !!tool;
+  $("toolPanel").hidden = !tool;
+  $("nudgeRow").hidden = !(moveOn || tool);
+  document.body.classList.toggle("tooling", !!tool);
+  if (!tool) return;
+  if (MOD.on) {
+    seg("modeRow", MOD_MODES, MOD.mode, k => { MOD.mode = k; if (k !== "select") pickPart(null); renderToolRows(); status("MODIFY: " + MOD_HINT[k]); });
+    const m = MOD.mode;
+    const opts = m === "door" ? [entries(Builder.DOOR_STYLES), MOD.door, k => { MOD.door = k; if (MOD.lastOp && MOD.lastOp.opts.mode === "door") editOp(MOD.lastOp, { doorStyle: k, doorWidth: undefined, doorHeight: undefined }); renderToolRows(); }]
+      : m === "balustrade" ? [entries(Builder.BALUSTRADE_STYLES), MOD.bal, k => { MOD.bal = k; if (MOD.lastOp && MOD.lastOp.opts.mode === "balustrade") editOp(MOD.lastOp, { balustradeStyle: k }); renderToolRows(); }]
+      : m === "column" ? [entries(Builder.COLUMN_SHAPES), MOD.col, k => { MOD.col = k; const el = MOD.element; if (el && el.parent && el.userData.element.kind === "column") { updateElement(el, { shape: k }); partsChanged(); } renderToolRows(); }]
+      : null;
+    $("optRow").hidden = !opts; if (opts) seg("optRow", ...opts);
+    $("levelBox").hidden = true; $("allBtn").hidden = true; $("doneBtn").hidden = true;
+    $("snapBtn").hidden = false; $("snapBtn").classList.toggle("on", SNAPS.on);
+    $("flipBtn").hidden = m !== "door";
+  } else {
+    seg("modeRow", INT_MODES, IN.mode, k => { IN.mode = k; IN.chain = null; renderToolRows(); status(INT_HINT[k]); });
+    const sel = selItem(), slot = ["door", "extdoor", "stair", "core"].includes(IN.mode) ? IN.mode : sel && ["door", "stair", "core"].includes(sel.kind) ? sel.kind : null;
+    const kind = slot === "extdoor" ? "door" : slot;
+    $("optRow").hidden = !kind;
+    if (kind) {
+      const set = { door: Builder.DOOR_STYLES, stair: Builder.STAIR_TYPES, core: Builder.CORE_STYLES }[kind];
+      const cur = sel && sel.kind === kind ? (kind === "door" ? (sel.style || "single") : kind === "stair" ? (sel.type || "dogleg") : (sel.style || "lift")) : IN.style[slot];
+      seg("optRow", entries(set), cur, k => {
+        IN.style[slot] = k;
+        const it = selItem();
+        if (it && it.kind === kind) {
+          if (kind === "door") replaceItem({ ...it, style: k, w: Builder.DOOR_STYLES[k].w, h: Builder.DOOR_STYLES[k].h });
+          else if (kind === "stair") { const n2 = { ...it, type: k }; delete n2.rise; replaceItem(n2); }
+          else replaceItem({ ...it, style: k });
+        } else renderToolRows();
+      });
+    }
+    const n = Builder.floorCount(sketchParams);
+    $("levelBox").hidden = false; $("levelVal").textContent = (IN.level === 0 ? "GROUND" : "LEVEL " + IN.level) + (n > 1 ? ` / ${n}` : "");
+    $("allBtn").hidden = false; $("allBtn").textContent = IN.all ? "ALL FLOORS" : "THIS FLOOR"; $("allBtn").classList.toggle("on", IN.all);
+    $("doneBtn").hidden = IN.mode !== "wall"; $("snapBtn").hidden = true;
+    $("flipBtn").hidden = !(IN.mode === "door" || IN.mode === "extdoor" || (sel && sel.kind === "door"));
+  }
+  holdFrame = false;
+}
+// building styles for a model built here: the style's roof, walls, windows and front door
+function applyStyle(key) {
+  if (!sketchParams) return;
+  const st = Builder.BUILDING_STYLES[key]; if (!st) return;
+  rebuildSketch(Builder.applyBuildingStyle(sketchParams, key));
+  status(`${st.label}: ${(ROOF_LABEL[sketchParams.roofType] || "").toLowerCase()}, ${WINDOW_LABEL[sketchParams.windowType].toLowerCase()} windows. Add its ${Builder.DOOR_STYLES[st.door].label.toLowerCase()} front door with MODIFY → DOOR.`);
+  MOD.door = st.door; IN.style.extdoor = st.door;
+}
+function bindTools() {
+  $("modBtn").onclick = () => setTool("modify");
+  $("intBtn").onclick = () => setTool("interior");
+  seg("styleRow", entries(Builder.BUILDING_STYLES), null, applyStyle);
+  $("deleteBtn").onclick = deleteSelected;
+  $("undoBtn").onclick = undoModify;
+  $("flipBtn").onclick = flipDoor;
+  $("turnSelBtn").onclick = turnSelected;
+  $("snapBtn").onclick = () => { SNAPS.on = !SNAPS.on; renderToolRows(); status(`Snap ${SNAPS.on ? "on: taps land on the nearest end, midpoint, edge or centre" : "off"}.`); };
+  $("lvDown").onclick = () => changeLevel(-1); $("lvUp").onclick = () => changeLevel(1);
+  $("allBtn").onclick = () => { IN.all = !IN.all; renderToolRows(); status(IN.all ? "New items go on every floor." : "New items go on this floor only."); };
+  $("doneBtn").onclick = () => { IN.chain = null; status("Wall finished."); };
+  bindTaps();
+}
+
+/* ---------------- a model from a PDF drawing set (desktop's reader, on the phone) ---------------- */
+let drawingModel = null;
+function buildFromDrawings(d, name) {
+  if (!d.ok) throw new Error(d.error || "the PDF couldn't be read");
+  const sheets = Drawings.classifySheets(d.pages.map(p => ({ page: p.page, words: p.words })));
+  const plans = sheets.filter(s => s.kind === "plan");
+  if (!plans.length) { status("No floor plan sheet was found in " + name + " (it looks for titles like GROUND FLOOR or FLOOR PLAN), so no model was built."); post({ type: "error", error: "No floor plan found" }); return; }
+  const sh = plans[0], page = d.pages.find(p => p.page === sh.page);
+  const written = [sh.scale, ...sheets.filter(s => s.scale && s.kind !== "plan").map(s => s.scale)].filter(Boolean);
+  const sc = Drawings.planScale(page, sh.scale ? [sh.scale] : written), scale = sc.scale;
+  const plan = Drawings.readPlan(page, page.words, scale);
+  if (plan.error) { status(plan.error); return; }
+  if (!sh.scale) plan.assumed.unshift(`the plan's scale wasn't legible, so 1:${scale}: ` + (sc.checked ? `it makes the outside walls ${Math.round(sc.wall * 1000)} mm thick` : "check the sizes"));
+  else if (!sc.checked) plan.assumed.unshift(`1:${scale} as written, though the outside walls come out ${Math.round((sc.wall || 0) * 1000)} mm thick: check the scale`);
+  if (plans.length > 1) plan.assumed.push(`${plans.length} plan sheets: this builds sheet ${sh.page} (the first); the others aren't stacked yet`);
+  const h = Drawings.readHeights(sheets, plan);
+  const sched = sheets.filter(s => s.kind === "windows").flatMap(s => Drawings.readWindowSchedule(d.pages.find(p => p.page === s.page).words));
+  const nMatched = Drawings.applyWindowSchedule(plan, sched);
+  if (sched.length) plan.read.push(`window schedule: ${sched.length} windows listed, ${nMatched} matched by width`);
+  const roofSheet = sheets.find(s => s.kind === "roof"), roofs = roofSheet ? Drawings.readRoofPlan(d.pages.find(p => p.page === roofSheet.page), roofSheet.scale || 200) : [];
+  for (const r of roofs) plan.read.push(`roof plan: ${r.who === "existing" ? "existing" : r.who === "carport" ? "carport" : "new"} ${r.type === "mono" ? "skillion" : r.type} roof${r.pitch ? ` at ${r.pitch}°` : ""}`);
+  if (!roofSheet) plan.assumed.push("no roof plan in the set: add a roof with SKETCH or MODIFY");
+  drawingModel = { plan, h, name, sheet: sh.page, roofs, sheets: sheets.length };
+  showDrawingModel(true);
+  post({ type: "loaded", name });
+}
+function showDrawingModel(first) {
+  const dm = drawingModel, { plan, h } = dm;
+  const keepPos = !first && modelRoot ? { p: modelRoot.position.clone(), r: modelRoot.rotation.y, cam: camera.position.clone(), tgt: controls.target.clone() } : null;
+  MOD.ops = []; MOD.undo = []; MOD.lastOp = null; MOD.element = null; MOD.picked = null;
+  setModel(Drawings.buildPlanModel(plan, h, { roofs: dm.roofs }));
+  if (keepPos) { modelRoot.position.copy(keepPos.p); modelRoot.rotation.y = keepPos.r; placeModel(); camera.position.copy(keepPos.cam); controls.target.copy(keepPos.tgt); controls.update(); buildNeighbours(); }
+  $("renderBtn").disabled = false; $("captureBtn").disabled = false;
+  seg("drawRow", plan.buildings.map((b, i) => [String(i), `BUILDING ${i + 1}: ${b.existing ? "EXISTING" : "NEW"}`]), null, k => {
+    const b = plan.buildings[+k]; b.existing = !b.existing;
+    for (const i of b.walls) plan.walls[i].existing = b.existing;
+    showDrawingModel(false);
+    status(`Building ${+k + 1} is ${b.existing ? "existing" : "new"} work.`);
+  });
+  $("drawRow").hidden = plan.buildings.length < 1;
+  renderToolRows();
+  if (first) status(`Built from ${dm.name} (${dm.sheets} sheets, plan on sheet ${dm.sheet}). Read: ${[...plan.read, ...h.read].join("; ")}.` + ([...plan.assumed, ...h.assumed].length ? ` Assumed: ${[...plan.assumed, ...h.assumed].join("; ")}.` : "") + " Tap a building number to mark it existing or new.");
+}
+
+let incomingDrawings = null;
+function resetTools() {
+  if (MOD.on || IN.on) setTool(null);
+  MOD.ops = []; MOD.undo = []; MOD.lastOp = null; MOD.element = null; MOD.picked = null; IN.undo = []; IN.sel = null; IN.chain = null; IN.level = 0;
+  drawingModel = null; $("drawRow").hidden = true;
+}
+
 /* ---------------- UI ---------------- */
 function bindUi() {
   $("openBtn").onclick = () => post({ type: "pickModel" });
@@ -671,6 +1294,7 @@ function bindUi() {
   $("stepBtn").onclick = () => { stepI = (stepI + 1) % STEPS.length; stepLabel(); };
   stepLabel();
   bindMove();
+  bindTools();
   $("renderBtn").onclick = renderPhoto;
   $("captureBtn").onclick = captureView;
   $("time").oninput = e => { holdFrame = false; hours = Number(e.target.value); applySun(); };
@@ -766,7 +1390,15 @@ window.__mono = {
     try { if (kind === "elevation") applyElevationSketch(JSON.parse(parts.join(""))); else buildFromSketch(JSON.parse(parts.join("")), name || "the sketch"); }
     catch (e) { status("Couldn't build from the sketch: " + (e && e.message)); post({ type: "sketchRead", error: String(e && e.message || e) }); }
   },
-  modelBegin(name) { sketchParams = null; yLift = 0; moved = { x: 0, z: 0 }; $("editRow").hidden = true; $("elevBtn").hidden = true; incoming = { name, parts: [] }; status("Loading " + name + "…"); },
+  modelBegin(name) { resetTools(); sketchParams = null; drawingModel = null; $("drawRow").hidden = true; yLift = 0; moved = { x: 0, z: 0 }; $("editRow").hidden = true; $("elevBtn").hidden = true; incoming = { name, parts: [] }; status("Loading " + name + "…"); },
+  // a PDF drawing set read on the phone (Drawings.swift's JSON, in chunks)
+  drawingsBegin(name) { resetTools(); sketchParams = null; $("editRow").hidden = true; $("elevBtn").hidden = true; incomingDrawings = []; status("Building the model from " + name + "…"); },
+  drawingsChunk(part) { if (incomingDrawings) incomingDrawings.push(part); },
+  drawingsEnd(name) {
+    const parts = incomingDrawings; incomingDrawings = null; if (!parts) return;
+    try { buildFromDrawings(JSON.parse(parts.join("")), name || "the drawings"); }
+    catch (e) { status("Couldn't build from the drawings: " + (e && e.message)); post({ type: "error", error: String(e && e.message || e) }); }
+  },
   modelChunk(part) { if (incoming) incoming.parts.push(part); },
   async modelEnd() {
     const job = incoming; incoming = null;
@@ -776,7 +1408,8 @@ window.__mono = {
       setModel(root);
       let meshes = 0; root.traverse(o => { if (o.isMesh) meshes++; });
       if (!meshes) throw new Error("No geometry found in " + job.name + ".");
-      status(job.name + " — drag to orbit, pinch to zoom. If it's lying on its side, tap Turn.");
+      renderToolRows();
+      status(job.name + " — drag to orbit, pinch to zoom. If it's lying on its side, tap Turn. MODIFY adds doors, windows, verandahs and more.");
       $("renderBtn").disabled = false; $("captureBtn").disabled = false;
       post({ type: "loaded", name: job.name });
     } catch (e) {

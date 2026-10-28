@@ -486,7 +486,7 @@ export default function App() {
 
         <View style={styles.card}>
           <Text style={styles.sectionLabel}>RENDER ON THIS PHONE</Text>
-          <Text style={styles.sectionNote}>Your 3D model (.dae, .glb, .obj), or one built from a photo of your sketch, on the real site — Apple Maps satellite ground and the real sun. Clay or Photoreal. Your model is never uploaded and no key is needed.</Text>
+          <Text style={styles.sectionNote}>Your 3D model (.dae, .glb, .obj), one built from a PDF drawing set, or one from a photo of your sketch, on the real site — Apple Maps satellite ground and the real sun. Clay or Photoreal. Your model is never uploaded and no key is needed.</Text>
           <TouchableOpacity style={[styles.buttonLight, styles.noTopMargin]} onPress={() => { setStartSketch(false); setShowLocalRender(true); }}>
             <Text style={styles.buttonLightText}>OPEN 3D MODEL</Text>
           </TouchableOpacity>

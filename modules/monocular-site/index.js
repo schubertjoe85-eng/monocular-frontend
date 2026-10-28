@@ -22,3 +22,9 @@ export function readSketch(uri) {
   if (!Native) return Promise.reject(new Error("Reading sketches needs the latest Monocular build."));
   return Native.readSketch(uri);
 }
+
+// Reads a PDF drawing set with the desktop's reader (PDF line work + Apple Vision), on the phone. Returns its JSON text.
+export function readDrawingSet(uri) {
+  if (!Native || !Native.readDrawingSet) return Promise.reject(new Error("Reading drawing sets needs the latest Monocular build."));
+  return Native.readDrawingSet(uri);
+}

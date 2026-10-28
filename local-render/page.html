@@ -19,15 +19,29 @@
   #timeRow { opacity: .45; }
   #timeRow input { flex: 1; accent-color: #7FBF9A; }
   #timeLabel { color: #aaa; font-size: 11px; margin-top: 2px; }
+  .scroll { overflow-x: auto; -webkit-overflow-scrolling: touch; scrollbar-width: none; }
+  .scroll::-webkit-scrollbar { display: none; }
+  .scroll button { flex: 0 0 auto; padding: 10px 12px; }
+  #overlay { position: fixed; top: 0; left: 0; width: 100vw; height: 100vh; pointer-events: none; }
+  #overlay .sel { fill: rgba(74,140,255,.25); stroke: #4a8cff; stroke-width: 3; }
+  #overlay .snap { fill: none; stroke: #ff3db4; stroke-width: 2.5; }
+  #snapMark { position: fixed; pointer-events: none; transform: translate(-9px, -9px); }
+  #snapMark i { display: block; width: 14px; height: 14px; border: 2.5px solid #ff3db4; transform: rotate(45deg); }
+  #snapMark b { position: absolute; left: 18px; top: -16px; background: #ff3db4; color: #fff; font-size: 10px; padding: 2px 5px; border-radius: 4px; }
+  body.tooling #timeRow, body.tooling #timeLabel, body.tooling #editRow, body.tooling #mainRow, body.tooling #captureRow { display: none; }
+  body.tooling #status { min-height: 32px; }
+  #snapMark[hidden], #toolPanel[hidden], span[hidden] { display: none; }
 </style>
 </head>
 <body>
 <canvas id="view"></canvas>
+<svg id="overlay"></svg>
+<div id="snapMark" hidden><i></i><b></b></div>
 <div id="panel">
   <div id="status">Starting…</div>
   <div class="row" id="timeRow"><span style="font-size:12px;color:#aaa">Time</span><input id="time" type="range" min="5" max="20" step="0.25" value="10"></div>
   <div id="timeLabel"></div>
-  <div class="row">
+  <div class="row" id="mainRow">
     <button id="openBtn">OPEN</button>
     <button id="sketchBtn" title="Photograph a plan sketch and build the model from it">SKETCH</button>
     <button id="clayBtn">CLAY</button>
@@ -47,7 +61,27 @@
     <button id="szDown" class="pm">−</button><span class="val" id="szVal">24 M</span><button id="szUp" class="pm">+</button>
     <button id="winBtn" title="Windows on the walls the sketch doesn't mark as glass or solid">WINDOWS</button>
   </div>
-  <div class="row">
+  <div class="row scroll" id="styleRow" hidden></div>
+  <div class="row scroll" id="drawRow" hidden></div>
+  <div class="row" id="toolRow" hidden>
+    <button id="modBtn" title="Doors, windows, glazing, verandahs, balustrades, columns; select, move and delete any part">MODIFY</button>
+    <button id="intBtn" title="Walls, doors, stairs and lifts inside, floor by floor">INTERIOR</button>
+  </div>
+  <div id="toolPanel" hidden>
+    <div class="row scroll" id="modeRow"></div>
+    <div class="row scroll" id="optRow" hidden></div>
+    <div class="row">
+      <span class="row" id="levelBox" style="margin:0;flex:0 0 auto" hidden><button id="lvDown" class="pm">▼</button><span class="val" id="levelVal">GROUND</span><button id="lvUp" class="pm">▲</button></span>
+      <button id="allBtn" hidden>THIS FLOOR</button>
+      <button id="snapBtn" class="on" title="Taps land on the nearest end, midpoint, edge or centre">SNAP</button>
+      <button id="flipBtn" hidden>FLIP</button>
+      <button id="turnSelBtn">TURN</button>
+      <button id="doneBtn" hidden>DONE</button>
+      <button id="deleteBtn">DELETE</button>
+      <button id="undoBtn">UNDO</button>
+    </div>
+  </div>
+  <div class="row" id="captureRow">
     <button id="captureBtn" disabled>QUICK CAPTURE</button>
     <button id="elevBtn" hidden title="Photograph an elevation: wall height, roof and windows">ELEVATION</button>
     <button id="renderBtn" class="primary" disabled>PHOTOREAL RENDER</button>

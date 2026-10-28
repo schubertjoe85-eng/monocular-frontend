@@ -18,6 +18,15 @@ public class MonocularSiteModule: Module {
       }
     }
 
+    // Reads a PDF drawing set on the phone - the same reader as desktop (Drawings.swift): each sheet's dark filled
+    // shapes, coloured lines and the words Apple Vision reads on it. Returns its JSON.
+    AsyncFunction("readDrawingSet") { (uri: String, promise: Promise) in
+      let path = uri.hasPrefix("file://") ? (URL(string: uri)?.path ?? String(uri.dropFirst(7))) : uri
+      DispatchQueue.global(qos: .userInitiated).async {
+        promise.resolve(readDrawingSetJSON(path: path))
+      }
+    }
+
     // Base64 image (no data: prefix) of a `meters` x `meters` square centred on the coordinate, north up, `size`
     // pixels square. kind "satellite" -> JPEG; kind "map" -> PNG (lossless, the tracing reads exact map colours).
     AsyncFunction("snapshot") { (lat: Double, lng: Double, meters: Double, size: Double, kind: String, promise: Promise) in
