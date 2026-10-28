@@ -1,5 +1,5 @@
 // cloudApi.js — Monocular "own keys" AI renders, ported from Monocular Desktop's
-// Monocular Eye. Stills go straight from this phone to OpenAI (gpt-image-1) and
+// Monocular Eye. Stills go straight from this phone to OpenAI (GPT Image 2.5) and
 // videos to Runway (gen4_turbo), using keys the user pasted into Settings. There
 // is no Monocular server in between, and the keys never leave the phone except
 // in the Authorization header to OpenAI / Runway themselves.
@@ -93,22 +93,31 @@ async function readError(res, fallback) {
   } catch {}
   return fallback;
 }
-// gpt-image-1 image edit. Returns a local PNG file URI.
+// OpenAI image edit. Returns a local PNG file URI. gpt-image-1 was shut down on 2026-10-23: GPT Image 2.5 Sunburst
+// is its replacement, with gpt-image-2 behind it for keys that can't use 2.5 yet. input_fidelity ("stay close to the
+// input") is sent where the model takes it, and dropped when a model says it doesn't.
+const OPENAI_IMAGE_MODELS = ["gpt-image-2.5-sunburst", "gpt-image-2"];
 export async function openAiStill(key, image, prompt) {
   if (!key) throw new Error("Add your OpenAI API key in Settings first.");
-  const form = new FormData();
-  form.append("model", "gpt-image-1");
-  form.append("prompt", prompt);
-  form.append("input_fidelity", "high");   // gpt-image-1's own "stay close to the input" setting
-  form.append("size", image.width >= image.height ? "1536x1024" : "1024x1536");
-  form.append("image", { uri: image.uri, name: "capture.jpg", type: "image/jpeg" });
-  let res;
-  try {
-    res = await fetch("https://api.openai.com/v1/images/edits", { method: "POST", headers: { Authorization: `Bearer ${key}` }, body: form });
-  } catch (e) {
-    throw new Error("Couldn't reach OpenAI — check your connection.");
+  let res, fidelity = true, lastErr = null;
+  for (let i = 0; i < OPENAI_IMAGE_MODELS.length; i++) {
+    const form = new FormData();
+    form.append("model", OPENAI_IMAGE_MODELS[i]);
+    form.append("prompt", prompt);
+    if (fidelity) form.append("input_fidelity", "high");
+    form.append("size", image.width >= image.height ? "1536x1024" : "1024x1536");
+    form.append("image", { uri: image.uri, name: "capture.jpg", type: "image/jpeg" });
+    try {
+      res = await fetch("https://api.openai.com/v1/images/edits", { method: "POST", headers: { Authorization: `Bearer ${key}` }, body: form });
+    } catch (e) {
+      throw new Error("Couldn't reach OpenAI — check your connection.");
+    }
+    if (res.ok) break;
+    lastErr = await readError(res, `OpenAI request failed (${res.status}).`);
+    if (fidelity && /input_fidelity/i.test(lastErr)) { fidelity = false; i--; continue; }   // same model, without it
+    if (!/model|does not exist|not found|access/i.test(lastErr)) break;                     // a real error: say it
   }
-  if (!res.ok) throw new Error(await readError(res, `OpenAI request failed (${res.status}).`));
+  if (!res.ok) throw new Error(lastErr || `OpenAI request failed (${res.status}).`);
   const j = await res.json();
   const b64 = j && j.data && j.data[0] && j.data[0].b64_json;
   if (!b64) throw new Error("OpenAI returned no image.");
