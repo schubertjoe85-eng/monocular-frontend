@@ -85,7 +85,7 @@ function init() {
     if (rendering || holdFrame) return;
     const w = window.innerWidth, h = Math.max(1, window.innerHeight - $("panel").offsetHeight);
     if (w !== lastW || h !== lastH) resize();
-    controls.update(); renderer.render(scene, camera); drawOverlay();
+    controls.update(); syncModelClip(); renderer.render(scene, camera); drawOverlay();
   });
   status("Open a 3D model (.dae, .glb, .obj) or a PDF drawing set, or build one from a SKETCH.");
   post({ type: "ready" });
@@ -1011,11 +1011,28 @@ const intItems = () => (sketchParams && sketchParams.interior) || [];
 const newId = () => Math.random().toString(36).slice(2, 9);
 const selItem = () => IN.sel && intItems().find(x => x.id === IN.sel);
 var planCut = null, savedView = null, sunShadow = null;   // var: the sun reads planCut before this line runs
+// The plan cut clips the model only: renderer.clippingPlanes would also slice the satellite ground, terrain,
+// neighbours and trees. The loop keeps the planes on parts added later (Modify, rebuilds).
+var modelClip = [], clipSynced = false;
+function syncModelClip() {
+  modelClip = modelClip || [];
+  if (clipSynced && !modelClip.length) return;
+  clipSynced = true;
+  if (!modelRoot) return;
+  modelRoot.traverse(n => {
+    if (!n.isMesh || !n.material) return;
+    (Array.isArray(n.material) ? n.material : [n.material]).forEach(m => {
+      if (m.clippingPlanes === modelClip || (!modelClip.length && !(m.clippingPlanes && m.clippingPlanes.length))) return;
+      m.clippingPlanes = modelClip.length ? modelClip : null; m.clipShadows = true; m.needsUpdate = true;
+    });
+  });
+}
 function setPlanCut(yModel) {
   const obj = built();
   planCut = yModel == null || !obj ? null : obj.localToWorld(new THREE.Vector3(0, yModel, 0)).y;
   renderer.localClippingEnabled = true;
-  renderer.clippingPlanes = planCut == null ? [] : [new THREE.Plane(new THREE.Vector3(0, -1, 0), planCut)];
+  renderer.clippingPlanes = [];
+  modelClip = planCut == null ? [] : [new THREE.Plane(new THREE.Vector3(0, -1, 0), planCut)]; clipSynced = false; syncModelClip();
   if (planCut != null) { if (sunShadow == null) sunShadow = sun.castShadow; sun.castShadow = false; }
   else if (planCut == null && sunShadow != null) { sun.castShadow = sunShadow; sunShadow = null; }
   holdFrame = false;
