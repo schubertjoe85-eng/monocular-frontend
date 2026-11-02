@@ -32,7 +32,7 @@ import * as MediaLibrary from "expo-media-library";
 import { geocodeAddress } from "./site";
 import * as FileSystem from "expo-file-system";
 import OnboardingScreen, { shouldShowOnboarding } from "./OnboardingScreen";
-import { loadKeys, saveKeys, prepareImage, buildStillPrompt, buildVideoPrompt, openAiStill, runwayVideo } from "./cloudApi";
+import { loadKeys, saveKeys, prepareImage, buildStillPrompt, buildVideoPrompt, openAiStill, runwayVideo, directStill } from "./cloudApi";
 // NOTE: ModelViewerScreen and LocalRenderScreen are deliberately NOT imported
 // here. Importing them at the top level loads their GL / WebView stacks at app
 // launch, and any import-time error there kills the app on the splash screen.
@@ -143,8 +143,8 @@ export default function App() {
   const [showLocalRender, setShowLocalRender] = useState(false);
   const [startSketch, setStartSketch] = useState(false);   // open the renderer straight onto "photograph a sketch"
   const [showSettings, setShowSettings] = useState(false);
-  const [keys, setKeys] = useState({ openAi: "", runway: "" });
-  const [keyDraft, setKeyDraft] = useState({ openAi: "", runway: "" });
+  const [keys, setKeys] = useState({ openAi: "", runway: "", anthropic: "", director: "claude" });
+  const [keyDraft, setKeyDraft] = useState({ openAi: "", runway: "", anthropic: "", director: "claude" });
   const [showKeys, setShowKeys] = useState(false);
   const videoStopRef = useRef(false);
   const [shotDemo, setShotDemo] = useState(null);
@@ -191,7 +191,9 @@ export default function App() {
       const stored = await loadKeys();
       setKeys(stored);
       setShowSettings(false);
-      setMessage(stored.openAi || stored.runway ? "Keys saved on this phone." : "Keys removed.");
+      setMessage(stored.openAi || stored.runway || stored.anthropic
+        ? "Keys saved on this phone." + (stored.anthropic && stored.director !== "builtin" ? " Claude will direct AI stills." : "")
+        : "Keys removed.");
     } catch (e) {
       setMessage("Couldn't save the keys: " + (e.message || e));
     }
@@ -270,9 +272,12 @@ export default function App() {
       const image = await prepareImage(selectedImage);
       setMessage("Rendering via OpenAI... this usually takes under a minute.");
       const still = buildStillPrompt(prompt.trim(), { interior: mode === "interior", site: siteLocation, address: siteAddress.trim() });
-      const uri = await openAiStill(keys.openAi, image, still);
+      if (keys.anthropic && keys.director !== "builtin") setMessage("Claude is directing the shot...");
+      const directed = await directStill(keys, image, still);
+      setMessage("Rendering via OpenAI... this usually takes under a minute.");
+      const uri = await openAiStill(keys.openAi, image, directed.prompt);
       setResultImage(uri);
-      setMessage("Render complete. Tap the image to view full screen.");
+      setMessage(`Render complete${directed.note}. Tap the image to view full screen.`);
     } catch (error) {
       setMessage(error.message || "Render failed.");
     } finally {
@@ -312,7 +317,8 @@ export default function App() {
       const site = { site: siteLocation, address: siteAddress.trim() };
       if (keys.openAi) {
         setVideoStatus("Making the still photographic via OpenAI...");
-        const polished = await openAiStill(keys.openAi, image, buildStillPrompt(prompt.trim(), { interior: mode === "interior", ...site }));
+        const directed = await directStill(keys, image, buildStillPrompt(prompt.trim(), { interior: mode === "interior", ...site }));
+        const polished = await openAiStill(keys.openAi, image, directed.prompt);
         if (videoStopRef.current) throw new Error("Video cancelled.");
         image = await prepareImage(polished);
       }
@@ -401,10 +407,16 @@ export default function App() {
             <View style={styles.paywallCard}>
               <Text style={styles.paywallTitle}>SETTINGS</Text>
               <Text style={styles.paywallBody}>
-                On-phone renders need no key. AI stills use your OpenAI account and videos use your Runway account — you pay them directly for what you use. Keys are stored only in this phone's Keychain and are sent only to OpenAI or Runway.
+                On-phone renders need no key. AI stills use your OpenAI account, videos use your Runway account, and with an Anthropic key Claude directs each AI still — you pay them directly for what you use. Keys are stored only in this phone's Keychain and are sent only to OpenAI, Runway or Anthropic.
               </Text>
               {keyField("OPENAI API KEY", "openAi", "sk-...", "https://platform.openai.com/api-keys")}
               {keyField("RUNWAY API KEY", "runway", "key_...", "https://dev.runwayml.com/")}
+              {keyField("ANTHROPIC API KEY (CLAUDE DIRECTOR)", "anthropic", "sk-ant-...", "https://console.anthropic.com/settings/keys")}
+              <TouchableOpacity onPress={() => setKeyDraft({ ...keyDraft, director: keyDraft.director === "builtin" ? "claude" : "builtin" })}>
+                <Text style={styles.paywallLink}>
+                  {keyDraft.director === "builtin" ? "Claude directs AI stills: OFF (built-in prompt) — tap to turn on" : "Claude directs AI stills: ON when an Anthropic key is set — tap to turn off"}
+                </Text>
+              </TouchableOpacity>
               <TouchableOpacity onPress={() => setShowKeys(!showKeys)}>
                 <Text style={styles.paywallLink}>{showKeys ? "Hide keys" : "Show keys"}</Text>
               </TouchableOpacity>

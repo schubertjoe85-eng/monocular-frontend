@@ -8,18 +8,17 @@ import * as SecureStore from "expo-secure-store";
 import * as FileSystem from "expo-file-system";
 import * as ImageManipulator from "expo-image-manipulator";
 
-const KEY_NAMES = { openAi: "monocular.openAiKey", runway: "monocular.runwayKey" };
+const KEY_NAMES = { openAi: "monocular.openAiKey", runway: "monocular.runwayKey", anthropic: "monocular.anthropicKey", director: "monocular.director" };
 
 // Keys are stored in the iOS Keychain (expo-secure-store), never in plain storage.
 export async function loadKeys() {
-  const [openAi, runway] = await Promise.all([
-    SecureStore.getItemAsync(KEY_NAMES.openAi).catch(() => null),
-    SecureStore.getItemAsync(KEY_NAMES.runway).catch(() => null),
-  ]);
-  return { openAi: openAi || "", runway: runway || "" };
+  const [openAi, runway, anthropic, director] = await Promise.all(
+    [KEY_NAMES.openAi, KEY_NAMES.runway, KEY_NAMES.anthropic, KEY_NAMES.director].map(n => SecureStore.getItemAsync(n).catch(() => null)));
+  return { openAi: openAi || "", runway: runway || "", anthropic: anthropic || "", director: director === "builtin" ? "builtin" : "claude" };
 }
-export async function saveKeys({ openAi, runway }) {
-  for (const [name, value] of [[KEY_NAMES.openAi, openAi], [KEY_NAMES.runway, runway]]) {
+export async function saveKeys({ openAi, runway, anthropic, director }) {
+  await SecureStore.setItemAsync(KEY_NAMES.director, director === "builtin" ? "builtin" : "claude");
+  for (const [name, value] of [[KEY_NAMES.openAi, openAi], [KEY_NAMES.runway, runway], [KEY_NAMES.anthropic, anthropic]]) {
     const v = (value || "").trim();
     if (v) await SecureStore.setItemAsync(name, v);
     else await SecureStore.deleteItemAsync(name);
@@ -35,6 +34,53 @@ export async function prepareImage(uri) {
     ? await ImageManipulator.manipulateAsync(uri, [{ resize: out.width >= out.height ? { width: 1536 } : { height: 1536 } }], { compress: 0.9, format: ImageManipulator.SaveFormat.JPEG, base64: true })
     : await ImageManipulator.manipulateAsync(uri, [], { compress: 0.9, format: ImageManipulator.SaveFormat.JPEG, base64: true });
   return { uri: resized.uri, base64: resized.base64, width: resized.width, height: resized.height };
+}
+
+/* ---------------- Claude as the director (same as desktop 0.1.54) ---------------- */
+// Claude looks at the capture and writes the image prompt that goes to OpenAI, in place of the built-in template.
+// The template, with every fact from the model and the site, is its brief, so nothing it knew is lost. Same rules as
+// desktop: the capture is the geometry authority, fidelity before beauty, no invented features, real scale.
+const CLAUDE_DIRECTOR_MODEL = "claude-sonnet-5-5";
+const CLAUDE_DIRECTOR_RULES = [
+  "You are the director for an architectural visualisation. You will see a capture of a 3D model and a brief. Write the prompt that an image-editing model will receive together with this exact capture, to turn it into a photograph of the building as built.",
+  "",
+  "DIRECTOR RULES — how you must write the prompt:",
+  "1. GEOMETRY AUTHORITY: the capture is the authority on geometry. Describe what you actually see: the storey count, roof form and pitch, wall planes, the number and position of windows and doors, balconies, balustrades, columns, and the camera viewpoint. Tell the image model to keep every one of them exactly as shown.",
+  "2. FIDELITY FIRST: this is a rendering conversion, not a redesign. Photographic quality comes from light, materials and lens, never from changing the design.",
+  "3. BANNED INVENTIONS: no added or removed windows, doors, storeys, wings, roof features, dormers, chimneys, balconies, pools, fences, people, vehicles or furniture that aren't in the capture or named in the brief. No cartoon style, no oversaturated colour, no fisheye.",
+  "4. SCALE DATUM: state the building's real-world size in plain words from its own geometry and any dimensions in the brief (for example 'a two-storey house about 7 m tall and 14 m wide, with a standard 2.1 m entry door'). Name at least one standard-sized element as a ruler.",
+  "5. PROPORTION LOCK: the building renders at that scale. Its height-to-width ratio, storey heights and opening sizes do not change.",
+  "6. MATERIALS: use only the materials the brief gives. Where the brief says a material is unspecified, or gives none, describe that surface as plain neutral and never invent a finish.",
+  "7. SITE: the setting comes only from the brief (a real address, site facts or the owner's words). Without one, keep the surroundings exactly as shown.",
+  "",
+  "Reply with the prompt only: plain prose, under 220 words, no heading, no quotes, no list markers."
+].join("\n");
+// image: from prepareImage (JPEG, at most 1536 px — inside Anthropic's 5 MB / 1568 px guidance).
+async function directWithClaude(key, image, brief) {
+  const res = await fetch("https://api.anthropic.com/v1/messages", {
+    method: "POST",
+    headers: { "x-api-key": key, "anthropic-version": "2023-06-01", "content-type": "application/json" },
+    body: JSON.stringify({
+      model: CLAUDE_DIRECTOR_MODEL, max_tokens: 4000, system: CLAUDE_DIRECTOR_RULES,
+      messages: [{ role: "user", content: [
+        { type: "image", source: { type: "base64", media_type: "image/jpeg", data: image.base64 } },
+        { type: "text", text: "Brief, with the facts measured from the model and found for the site (these are authoritative):\n\n" + brief },
+      ] }],
+    }),
+  });
+  let j = null; try { j = await res.json(); } catch {}
+  if (!res.ok) throw new Error((j && j.error && j.error.message) || `Anthropic request failed (${res.status}).`);
+  const text = ((j && j.content) || []).filter(b => b.type === "text").map(b => b.text).join(" ")
+    .replace(/^["'`\s]+|["'`\s]+$/g, "").replace(/\s+/g, " ").trim();
+  if (text.length < 40) throw new Error("Claude returned no usable prompt.");
+  return text.slice(0, 4000);
+}
+// The prompt a still goes with: Claude's when there's an Anthropic key and Claude is on, otherwise the built-in one.
+// If Claude fails, the render still goes ahead on the built-in prompt and the note says why.
+export async function directStill(keys, image, builtin) {
+  if (keys.director === "builtin" || !(keys.anthropic || "").trim()) return { prompt: builtin, note: "" };
+  try { return { prompt: await directWithClaude(keys.anthropic.trim(), image, builtin), note: ", directed by Claude" }; }
+  catch (e) { return { prompt: builtin, note: ` (Claude couldn't direct: ${e.message} — the built-in prompt was used)` }; }
 }
 
 /* ---------------- prompts (same wording as desktop) ---------------- */
