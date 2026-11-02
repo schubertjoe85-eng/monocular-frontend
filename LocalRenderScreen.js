@@ -9,7 +9,7 @@
 // The renderer itself is a self-contained web page (localRenderHtml.js, built
 // from local-render/ by `npm run build:local-render`) running in a WebView,
 // because the path tracer needs full WebGL 2. Messages:
-//   page -> RN: ready | pickModel | loaded | result { dataUrl } | error
+//   page -> RN: ready | pickModel | loaded | result { dataUrl } | saveDrawing { dataUrl, name } | error
 //   RN -> page: window.__mono.setSite / modelBegin / modelChunk / modelEnd / drawingsBegin / drawingsChunk / drawingsEnd
 
 import React, { useRef, useState } from "react";
@@ -19,6 +19,7 @@ import { readSketch, readDrawingSet } from "./modules/monocular-site";
 import { WebView } from "react-native-webview";
 import * as DocumentPicker from "expo-document-picker";
 import * as FileSystem from "expo-file-system";
+import * as MediaLibrary from "expo-media-library";
 import localRenderHtml from "./localRenderHtml";
 import { geocodeAddress, satelliteFor, standardMapFor, fetchOsmText, fetchDem, SITE_METERS, RING_METERS } from "./site";
 
@@ -197,6 +198,21 @@ export default function LocalRenderScreen({ site, address = "", onSiteFound, onR
       } catch (e) {
         setError("Couldn't keep the render: " + (e.message || e));
       }
+    } else if (msg.type === "saveDrawing" && msg.dataUrl) {
+      // a marked-up plan or section goes straight to Photos; the renderer stays open for the next one
+      let note;
+      try {
+        const perm = await MediaLibrary.requestPermissionsAsync(true);
+        if (!perm.granted) note = "Allow Monocular to add to Photos (Settings > Monocular > Photos) to save drawings.";
+        else {
+          const uri = FileSystem.cacheDirectory + "monocular-drawing-" + Date.now() + ".jpg";
+          await FileSystem.writeAsStringAsync(uri, msg.dataUrl.split(",")[1], { encoding: FileSystem.EncodingType.Base64 });
+          const asset = await MediaLibrary.createAssetAsync(uri);
+          try { await MediaLibrary.createAlbumAsync("Monocular", asset, false); } catch {}
+          note = `Saved to Photos: ${msg.name || "drawing"}.`;
+        }
+      } catch (e) { note = "Couldn't save the drawing: " + (e.message || e); }
+      inject(`document.getElementById("shHint").textContent = ${JSON.stringify(note)};`);
     } else if (msg.type === "error") {
       setError(msg.error || "Render failed.");
     }

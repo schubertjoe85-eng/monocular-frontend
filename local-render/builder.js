@@ -8,7 +8,7 @@ import * as THREE from "three";
 export const DEFAULTS = {
   shape: "rect", width: 24, depth: 16, wing: 8, storeys: 4, storeyHeight: 3.2, slabThickness: 0.3, wallThickness: 0.3,
   windowType: "punched", windowWidth: 1.8, windowHeight: 1.8, sillHeight: 0.9, windowPitch: 3.0,
-  slabEdge: 0, twistDeg: 0, taper: 100, split: 0, roofType: "flat", roofPitchDeg: 25, overhang: 0.45, parapet: 1.0, roofThickness: 0.3,
+  slabEdge: 0, twistDeg: 0, taper: 100, split: 0, roofType: "flat", monoFall: "auto", roofPitchDeg: 25, overhang: 0.45, parapet: 1.0, roofThickness: 0.3,
 };
 export const LIMITS = {
   width: [3, 300], depth: [3, 300], wing: [2, 60], storeys: [1, 120], storeyHeight: [2.4, 8], slabThickness: [0.15, 1],
@@ -16,7 +16,8 @@ export const LIMITS = {
   slabEdge: [0, 4], split: [0, 4], twistDeg: [-15, 15], taper: [30, 200], roofPitchDeg: [5, 60], overhang: [0, 3], parapet: [0, 2], roofThickness: [0.05, 1],
 };
 export const SHAPES = ["rect", "L", "U", "courtyard", "round", "sketch"];
-export const WINDOW_TYPES = ["punched", "ribbon", "curtain", "none"];
+// "drawn": each wall keeps the windows read from the drawings (facades[key].windows, per storey), set by the AI Model Builder
+export const WINDOW_TYPES = ["punched", "ribbon", "curtain", "none", "drawn"];
 export const ROOF_TYPES = ["flat", "gable", "hip", "mono"];
 
 export function clampParams(raw){
@@ -141,6 +142,8 @@ function offsetLoop(loop, d, isHole){
 function openingsFor(p, L, h){
   const out = [], sill = Math.min(p.sillHeight, Math.max(0, h - 0.45)), wh = Math.min(p.windowHeight, h - sill - 0.15);
   if (p.windowType === "curtain") return [{ u0: 0, u1: L, v0: 0, v1: h, panes: Math.max(1, Math.round(L / p.windowWidth)), curtain: true }];
+  if (p.windowType === "drawn") return (p.drawn || []).map(w => ({ u0: Math.max(0.05, w.u0), u1: Math.min(L - 0.05, w.u1), v0: Math.max(0, w.v0), v1: Math.min(h, w.v1) }))
+    .filter(o => o.u1 - o.u0 > 0.2 && o.v1 - o.v0 > 0.2).map(o => ({ ...o, panes: Math.max(1, Math.ceil((o.u1 - o.u0) / 1.6)) }));
   if (p.windowType === "none" || wh < 0.3) return out;
   if (p.windowType === "ribbon") {
     if (L > 1.2) out.push({ u0: 0.3, u1: L - 0.3, v0: sill, v1: sill + wh, panes: Math.max(1, Math.round((L - 0.6) / p.windowWidth)) });
@@ -329,10 +332,55 @@ function sharedSpans(p, blocks, b, ed){
 
 // One outside wall's own thickness and windows, where they've been set; the building's otherwise.
 export const facadeKey = (b, l, e) => `${b}:${l}:${e}`;
-function facadeParams(p, b, l, e){
+function facadeParams(p, b, l, e, storey){
   const o = p.facades && p.facades[facadeKey(b, l, e)];
-  if (!o) return p;
-  return { ...p, wallThickness: Math.min(LIMITS.wallThickness[1], Math.max(LIMITS.wallThickness[0], o.t ?? p.wallThickness)), windowType: WINDOW_TYPES.includes(o.windowType) ? o.windowType : p.windowType };
+  if (!o) return p.windowType === "drawn" ? { ...p, drawn: [] } : p;
+  // drawn windows for this storey of the block, else the nearest storey below that has a list (a storey added later repeats it)
+  let drawn = [];
+  if (o.windows && storey != null) { for (let i = storey; i >= 0; i--) if (o.windows[i]) { drawn = o.windows[i]; break; } }
+  return { ...p, drawn, wallThickness: Math.min(LIMITS.wallThickness[1], Math.max(LIMITS.wallThickness[0], o.t ?? p.wallThickness)), windowType: WINDOW_TYPES.includes(o.windowType) ? o.windowType : p.windowType };
+}
+
+// A skillion (mono-pitch) roof over any outline: one plane falling along `fall` (plan [x, z], z south) at the roof pitch,
+// low at the wall top on the downhill side. The walls rise to meet it; the eaves follow the outline, offset by the overhang.
+const FALLS = { N: [0, -1], E: [1, 0], S: [0, 1], W: [-1, 0] };
+function monoRoof(acc, p, outer, top, fall, eaveLine, wallOps = () => [], wallTop = top, hFloor = 0){
+  let f = FALLS[p.monoFall] || fall;
+  if (!f) {   // nothing read or chosen: it falls away from the longest wall's inside, toward that wall
+    const E = edges(outer, false).sort((a, b) => b.L - a.L)[0]; f = E ? E.n : [0, 1];
+  }
+  const fl = Math.hypot(f[0], f[1]) || 1, fx = f[0] / fl, fz = f[1] / fl, tan = Math.tan(THREE.MathUtils.degToRad(p.roofPitchDeg));
+  const s = q => -(q[0] * fx + q[1] * fz), s0 = Math.min(...outer.map(s)), y = q => top + (s(q) - s0) * tan;
+  // walls up from the wall top to the roof plane, with the windows drawn up there (highlights, the top of a tall window).
+  // A single sheet just outside the wall face, so it also covers the roof slab's edge. wallOps(e): the windows of edge e
+  // ([{u0,u1,v0,v1}], v from the floor, hFloor = floor to wall top), or "curtain" for an all-glass wall.
+  edges(outer, false).forEach((ed, ei) => {
+    const hA = y(ed.A) - wallTop, hB = y(ed.B) - wallTop;
+    if (hA < 0.01 && hB < 0.01) return;
+    const P = (u, v, w = 0.003) => [ed.A[0] + ed.e[0] * u + ed.n[0] * w, wallTop + v, ed.A[1] + ed.e[1] * u + ed.n[1] * w];
+    const hAt = u => hA + (hB - hA) * u / ed.L, ops0 = wallOps(ei);
+    if (ops0 === "curtain") { acc.glass.quad(P(0, 0), P(ed.L, 0), P(ed.L, hB), P(0, hA)); acc.glass.quad(P(0, 0), P(0, hA), P(ed.L, hB), P(ed.L, 0)); return; }
+    const ops = (ops0 || []).map(o => ({ ...o, v0: Math.max(0, o.v0 - hFloor), v1: o.v1 - hFloor })).filter(o => o.v1 - o.v0 > 0.1 && o.v1 <= Math.max(hAt(o.u0), hAt(o.u1)) + 0.05);
+    const us = [...new Set([0, ed.L, ...ops.flatMap(o => [o.u0, o.u1])])].sort((a, b) => a - b);
+    const vs = [...new Set([0, Math.max(hA, hB), ...ops.flatMap(o => [o.v0, o.v1])])].sort((a, b) => a - b);
+    for (let i = 0; i + 1 < us.length; i++) for (let j = 0; j + 1 < vs.length; j++) {
+      const ua = us[i], ub = us[i + 1], va = vs[j], vb = vs[j + 1], ta = hAt(ua), tb = hAt(ub);
+      if (va >= Math.max(ta, tb) - 1e-4) continue;
+      if (ops.some(o => (ua + ub) / 2 > o.u0 && (ua + ub) / 2 < o.u1 && (va + vb) / 2 > o.v0 && (va + vb) / 2 < o.v1)) continue;
+      const q = [P(ua, va), P(ub, va), P(ub, Math.max(va, Math.min(vb, tb))), P(ua, Math.max(va, Math.min(vb, ta)))];
+      acc.wall.quad(...q); acc.wall.quad(q[0], q[3], q[2], q[1]);
+    }
+    for (const o of ops) windowUnit(acc, (u, v, w) => P(u, v, w), [ed.e[0], 0, ed.e[1]], [0, 1, 0], [ed.n[0], 0, ed.n[1]], { ...o, panes: Math.max(1, Math.ceil((o.u1 - o.u0) / 1.6)) }, -0.04);
+  });
+  // the roof sheet: the eave outline lifted onto the plane, triangulated (it can be any shape), with a thickness below it
+  const L = eaveLine, t = p.roofThickness, up = L.map(q => [q[0], y(q), q[1]]), lo = L.map(q => [q[0], y(q) - t, q[1]]);
+  const tris = THREE.ShapeUtils.triangulateShape(L.map(q => new THREE.Vector2(q[0], q[1])), []);
+  const ccw = THREE.ShapeUtils.isClockWise(L.map(q => new THREE.Vector2(q[0], q[1])));
+  for (const [i, j, k] of tris) {
+    if (ccw) { acc.roof.tri(up[i], up[j], up[k]); acc.roof.tri(lo[i], lo[k], lo[j]); }
+    else { acc.roof.tri(up[i], up[k], up[j]); acc.roof.tri(lo[i], lo[j], lo[k]); }
+  }
+  for (let i = 0; i < L.length; i++) { const j = (i + 1) % L.length; acc.roof.quad(up[i], lo[i], lo[j], up[j]); acc.roof.quad(up[i], up[j], lo[j], lo[i]); }
 }
 
 /** Build the whole building as a Y-up THREE.Group, ground floor at y = 0. */
@@ -379,7 +427,7 @@ export function buildModel(raw){
           continue;
         }
         const here = doors.filter(d => d.levels.includes(b.base + i));
-        wallEdge(acc, facadeParams(p, bi, li, ei), ed, ya + ts, H - ts, here, shared.length > 0, notes);
+        wallEdge(acc, facadeParams(p, bi, li, ei, i), ed, ya + ts, H - ts, here, shared.length > 0, notes);
       }
     }));
     const top = y0 + n * H + ts, { outer, holes } = loopsAt(n - 1);
@@ -388,6 +436,12 @@ export function buildModel(raw){
     if (roofType !== "flat" && !b.top) roofType = "flat";   // a block with another on it has a flat roof (a terrace)
     // an irregular plan can't take a simple gable or hip: its eaves rise to one peak instead
     const eaveLine = rs && rs.outline ? rs.outline : p.overhang > 0 ? offsetLoop(outer, p.overhang, false) : outer;
+    // a skillion over an irregular plan, one with a fall read from drawings, or one turned to fall a set way: one plane over the outline
+    if (roofType === "mono" && !holes.length && (!b.rect || (rs && rs.fall) || FALLS[p.monoFall])) {
+      const wallOps = ei => { const fp = facadeParams(p, bi, 0, ei, n - 1); return fp.windowType === "curtain" ? "curtain" : fp.windowType === "drawn" ? fp.drawn : []; };
+      monoRoof(acc, p, outer, top, rs && rs.fall, eaveLine, wallOps, top - ts, H - ts);
+      return;
+    }
     const peak = roofType !== "flat" && (rs && rs.type === "pyramid" || !b.rect || holes.length);
     if (peak && holes.length) { notes.add("A pitched roof over a courtyard isn't drawn; it has a flat roof."); roofType = "flat"; }
     else if (peak && !(rs && rs.type === "pyramid") && roofType !== "hip") flatForced = true;
@@ -423,7 +477,15 @@ export function buildModel(raw){
     }
   });
   interiorInto(acc, p, blocks, notes);
-  if (flatForced) notes.add("Gable and mono-pitch roofs need a rectangular block; on the others the eaves rise to one peak (hips).");
+  // loose parts read from drawings by the AI Model Builder (a stair core, balconies, decks, paths): plan [x, z], y up, kept as they are
+  const EXTRA = { glass: "glass", slab: "slab", wall: "wall", core: "col", timber: "door", frame: "frame" };
+  for (const x of p.extras || []) {
+    if (!(x && Array.isArray(x.c) && x.sx > 0 && x.sy > 0 && x.sz > 0)) continue;
+    // ang: degrees anticlockwise seen from above (z points south, so north is -z); 0 = its length runs east
+    const a = THREE.MathUtils.degToRad(x.ang || 0), ex = [Math.cos(a), 0, -Math.sin(a)], ez = [Math.sin(a), 0, Math.cos(a)];
+    acc[EXTRA[x.kind] || "slab"].box(x.c, ex, [0, 1, 0], ez, x.sx, x.sy, x.sz);
+  }
+  if (flatForced) notes.add("Gable roofs need a rectangular block; on the others the eaves rise to one peak (hips).");
   const group = new THREE.Group(); group.name = "Built model (concept)";
   for (const [key, name] of [["slab", "Floor slabs"], ["wall", "Walls"], ["roof", "Roof"], ["frame", "Frames and mullions"], ["glass", "Glazing"],
     ["iwall", "Internal walls"], ["door", "Doors"], ["stair", "Stairs"], ["col", "Columns and cores"]]) {
@@ -637,9 +699,69 @@ function facePatch(hit, rayDir, flat = false){
   while (queue.length) { const t = queue.pop(); for (let k = 0; k < 3; k++) for (const s of byVert.get(key(t, k)) || []) if (!region.has(s)) { region.add(s); queue.push(s); } }
   const tris2 = [...region].map(t => [0, 1, 2].map(k => frame.uv(triV(T, t, k))));
   const all = tris2.flat(), us = all.map(q => q[0]), vs = all.map(q => q[1]);
+  if (!flat && (Math.max(...us) - Math.min(...us) < 0.4 || Math.max(...vs) - Math.min(...vs) < 0.4)) { const rib = ribbedPatch(mesh, T, hit, n); if (rib) return rib; }
   // the whole wall in this plane (a face broken up by windows is still one wall), for things that run its length
   const allU = [...cop].flatMap(t => [0, 1, 2].map(k => frame.uv(triV(T, t, k))[0]));
   return { mesh, T, region, tris2, frame, umin: Math.min(...us), umax: Math.max(...us), vmin: Math.min(...vs), vmax: Math.max(...vs), wallU: [Math.min(...allU), Math.max(...allU)] };
+}
+// Corrugated or ribbed cladding is thousands of narrow facets, so the flat patch is one rib. Take the whole sheet instead:
+// the facets connected to the click within a thin slab along the wall's average facing, in a frame on its outer face.
+function ribbedPatch(mesh, T, hit, n0){
+  const nt = T.length / 9, o = hit.point, V3 = (t, k) => triV(T, t, k);
+  // the wall's facing: area-weighted normals of the facets that come within 0.3 m of the click (ribs average out)
+  let N = new THREE.Vector3(), off = 0;
+  for (let t = 0; t < nt; t++) {
+    const bb = new THREE.Box3().setFromPoints([V3(t, 0), V3(t, 1), V3(t, 2)]);
+    if (bb.distanceToPoint(o) > 0.3) continue;
+    const m = V3(t, 1).sub(V3(t, 0)).cross(V3(t, 2).sub(V3(t, 0)));
+    N.add(m.dot(n0) < 0 ? m.negate() : m);
+  }
+  if (N.lengthSq() < 1e-12) return null; N.normalize();
+  if (Math.abs(N.y) > 0.35) return null;
+  let region;
+  for (let pass = 0; pass < 2; pass++) {
+    // facets lying in a thin slab around the wall plane, joined where their corners come within a few cm of each other
+    const SLAB = 0.06, C = 0.03, cell = new Map(), ck = p => `${Math.floor(p.x / C)},${Math.floor(p.y / C)},${Math.floor(p.z / C)}`;
+    const keep = t => [0, 1, 2].every(k => Math.abs(V3(t, k).sub(o).dot(N) - off) <= SLAB);
+    for (let t = 0; t < nt; t++) if (keep(t)) for (let k = 0; k < 3; k++) { const q = ck(V3(t, k)); if (!cell.has(q)) cell.set(q, []); cell.get(q).push(t); }
+    if (!keep(hit.faceIndex)) return null;
+    region = new Set([hit.faceIndex]); const queue = [hit.faceIndex];
+    while (queue.length) {
+      const t = queue.pop();
+      for (let k = 0; k < 3; k++) {
+        const p = V3(t, k), x = Math.floor(p.x / C), y = Math.floor(p.y / C), z = Math.floor(p.z / C);
+        for (let i = -1; i <= 1; i++) for (let j = -1; j <= 1; j++) for (let l = -1; l <= 1; l++)
+          for (const s of cell.get(`${x + i},${y + j},${z + l}`) || []) if (!region.has(s)) { region.add(s); queue.push(s); }
+      }
+    }
+    // refit the plane to the sheet (walls can lean): the direction its corners spread least in
+    const pts = [...region].flatMap(t => [0, 1, 2].map(k => V3(t, k))), m = pts.reduce((s, p) => s.add(p), new THREE.Vector3()).divideScalar(pts.length);
+    const K = [0, 0, 0, 0, 0, 0, 0, 0, 0];
+    for (const p of pts) { const d = [p.x - m.x, p.y - m.y, p.z - m.z]; for (let i = 0; i < 3; i++) for (let j = 0; j < 3; j++) K[i * 3 + j] += d[i] * d[j]; }
+    const tr = K[0] + K[4] + K[8]; if (tr < 0.25) break;   // too small to refit
+    let e = N.clone();   // power iteration on (tr I - C) finds C's smallest axis
+    for (let it = 0; it < 60; it++) e = new THREE.Vector3(tr * e.x - (K[0] * e.x + K[1] * e.y + K[2] * e.z), tr * e.y - (K[3] * e.x + K[4] * e.y + K[5] * e.z), tr * e.z - (K[6] * e.x + K[7] * e.y + K[8] * e.z)).normalize();
+    if (Math.abs(e.y) > 0.35) break;
+    N = e.dot(N) < 0 ? e.negate() : e;
+    const ds = pts.map(p => p.clone().sub(o).dot(N)).sort((a, b) => a - b); off = ds[ds.length >> 1];
+  }
+  const out = Math.max(...[...region].flatMap(t => [0, 1, 2].map(k => V3(t, k).sub(o).dot(N))));
+  const fo = o.clone().addScaledVector(N, out), U = new THREE.Vector3().crossVectors(Y, N).normalize(), V = new THREE.Vector3().crossVectors(N, U).normalize();
+  const frame = { o: fo, n: N, U, V, uv: p => { const d = p.clone().sub(fo); return [d.dot(U), d.dot(V)]; }, at: (u, v, w = 0) => fo.clone().addScaledVector(U, u).addScaledVector(V, v).addScaledVector(N, w) };
+  const tris2 = [...region].map(t => [0, 1, 2].map(k => frame.uv(V3(t, k))));
+  const all = tris2.flat(), us = all.map(q => q[0]), vs = all.map(q => q[1]);
+  if (Math.max(...us) - Math.min(...us) < 0.4) return null;
+  return { mesh, T, region, tris2, frame, ribbed: true, umin: Math.min(...us), umax: Math.max(...us), vmin: Math.min(...vs), vmax: Math.max(...vs), wallU: [Math.min(...us), Math.max(...us)] };
+}
+// The floor just inside a wall at u: the highest upward surface a little in from the face, between v0 and v1 (null if none).
+function floorInside(root, frame, u, v0, v1){
+  const from = frame.at(u, v1, -0.35), rc = new THREE.Raycaster(from, new THREE.Vector3(0, -1, 0), 0, v1 - v0 + 0.01);
+  for (const h of rc.intersectObject(root, true)) {
+    if (!h.face || !h.object.isMesh) continue;
+    const nn = h.face.normal.clone().transformDirection(h.object.matrixWorld);
+    if (Math.abs(nn.y) > 0.9) return frame.uv(h.point)[1];
+  }
+  return null;
 }
 function inTri(u, v, [a, b, c]){
   const d = (b[1] - c[1]) * (a[0] - c[0]) + (c[0] - b[0]) * (a[1] - c[1]); if (Math.abs(d) < 1e-12) return false;
@@ -762,12 +884,25 @@ export function applyFaceOp(root, hit, rayDir, opts, wallMaterial){
     const style = DOOR_STYLES[opts.doorStyle] ? opts.doorStyle : "single", st = DOOR_STYLES[style];
     const dw = opts.doorWidth || st.w, dh = opts.doorHeight || st.h;
     const [hu, hv] = frame.uv(hit.point.clone());
-    const band = Math.min(bands - 1, Math.max(0, Math.floor((hv - patch.vmin) / bh))), vb = patch.vmin + band * bh;
-    const uc = Math.min(patch.umax - dw / 2 - 0.05, Math.max(patch.umin + dw / 2 + 0.05, hu));
-    const r = { u0: uc - dw / 2, u1: uc + dw / 2, v0: vb, v1: Math.min(vb + dh, vb + bh - 0.1) };
-    let inside = r.u1 - r.u0 > 0.4 && r.v1 - r.v0 > 1.5;
-    for (let a = 0; a <= 4 && inside; a++) for (let c = 0; c <= 4 && inside; c++) inside = inPatch(patch, r.u0 + 0.01 + (dw - 0.02) * a / 4, r.v0 + 0.02 + (r.v1 - r.v0 - 0.03) * c / 4);
-    if (!inside) return { ok: false, message: `No room on that wall for a ${dw.toFixed(2)} × ${dh.toFixed(2)} m ${st.label.toLowerCase()} door. Try a narrower one, or click nearer the middle of the wall.` };
+    const band = Math.min(bands - 1, Math.max(0, Math.floor((hv - patch.vmin) / bh)));
+    // cladding often runs past the floor to cover the bearers: stand the bottom door on the floor inside, if there is one
+    const fit = uc => {
+      let vb = patch.vmin + band * bh;
+      if (band === 0) { const f = floorInside(root, frame, uc, patch.vmin, Math.min(patch.vmin + 0.8, hv)); if (f !== null && f > vb) vb = f; }
+      const r = { u0: uc - dw / 2, u1: uc + dw / 2, v0: vb, v1: Math.min(vb + dh, patch.vmin + (band + 1) * bh - 0.1) };
+      let inside = r.u1 - r.u0 > 0.4 && r.v1 - r.v0 > 1.5;
+      for (let a = 0; a <= 4 && inside; a++) for (let c = 0; c <= 4 && inside; c++) inside = inPatch(patch, r.u0 + 0.01 + (dw - 0.02) * a / 4, r.v0 + 0.02 + (r.v1 - r.v0 - 0.03) * c / 4);
+      return inside ? r : null;
+    };
+    // where you clicked, or the nearest place along the wall it fits (clear of the ends and of openings already there)
+    const lo = patch.umin + dw / 2 + 0.05, hi = patch.umax - dw / 2 - 0.05, u0c = Math.min(hi, Math.max(lo, hu));
+    let r = null, uc = u0c;
+    for (let k = 0; !r && k * 0.05 <= patch.umax - patch.umin; k++) for (const sgn of k ? [1, -1] : [1]) {
+      const u = u0c + sgn * k * 0.05; if (r || u < lo - 1e-9 || u > hi + 1e-9) continue;
+      r = fit(u); if (r) uc = u;
+    }
+    if (!r) return { ok: false, message: `No room on that wall for a ${dw.toFixed(2)} × ${dh.toFixed(2)} m ${st.label.toLowerCase()} door. Try a narrower one, or a longer stretch of wall.` };
+    const moved = Math.abs(uc - hu) > 0.15;
     const overlap = q => Math.max(...q.map(x => x[0])) > r.u0 && Math.min(...q.map(x => x[0])) < r.u1 && Math.max(...q.map(x => x[1])) > r.v0 && Math.min(...q.map(x => x[1])) < r.v1;
     const back = backFaces(root, patch, 0.8, overlap), dd = back.depth;
     undos.push(cutMesh(patch.mesh, patch.region, frame, [r], false));
@@ -782,7 +917,7 @@ export function applyFaceOp(root, hit, rayDir, opts, wallMaterial){
     const added = addMeshes(root, [[acc.door, "Added door leaf", M.door], [acc.glass, "Added door glazing", M.glass], [acc.frame, "Added door frame", M.frame], [acc.wall, "Added door reveals", wallMaterial]]);
     dims.push({ key: "doorWidth", a: toRoot(r.u0, r.v1 + 0.3, 0.1), b: toRoot(r.u1, r.v1 + 0.3, 0.1), value: dw, unit: "m", step: 0.05, min: 0.5, max: 8, hint: "Door width" });
     dims.push({ key: "doorHeight", a: toRoot(r.u1 + 0.3, r.v0, 0.1), b: toRoot(r.u1 + 0.3, r.v1, 0.1), value: r.v1 - r.v0, unit: "m", step: 0.05, min: 1.8, max: 4, hint: "Door height" });
-    return { ok: true, message: `Added a ${st.label.toLowerCase()} door, ${dw.toFixed(2)} × ${(r.v1 - r.v0).toFixed(2)} m` + (dd > 0 ? "." : ". The wall has no inside face, so there are no reveals."),
+    return { ok: true, message: `Added ${/^[aeiou]/i.test(st.label) ? "an" : "a"} ${st.label.toLowerCase()} door, ${dw.toFixed(2)} × ${(r.v1 - r.v0).toFixed(2)} m` + (moved ? `, moved ${Math.abs(uc - hu).toFixed(2)} m along the wall to clear the openings and ends` : "") + (dd > 0 ? "." : ". The wall has no inside face, so there are no reveals."),
       added, undo: () => { added.forEach(m => { root.remove(m); m.geometry.dispose(); }); undos.reverse().forEach(u => u()); }, dims };
   }
 

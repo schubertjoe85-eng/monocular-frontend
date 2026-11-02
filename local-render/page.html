@@ -31,6 +31,17 @@
   body.tooling #timeRow, body.tooling #timeLabel, body.tooling #editRow, body.tooling #mainRow, body.tooling #captureRow { display: none; }
   body.tooling #status { min-height: 32px; }
   #snapMark[hidden], #toolPanel[hidden], span[hidden] { display: none; }
+  body.drawing #timeRow, body.drawing #timeLabel, body.drawing #editRow, body.drawing #mainRow, body.drawing #captureRow, body.drawing #styleRow, body.drawing #drawRow { display: none; }
+  body.drawing #status { min-height: 32px; }
+  #drawPanel[hidden], #sheet[hidden], #shText[hidden] { display: none; }
+  #drSecRow input { flex: 1; accent-color: #7FBF9A; }
+  #sheet { position: fixed; inset: 0; z-index: 20; background: #111; display: flex; flex-direction: column; padding: calc(8px + env(safe-area-inset-top)) 10px calc(10px + env(safe-area-inset-bottom)); box-sizing: border-box; }
+  #shWrap { flex: 1; min-height: 0; display: flex; align-items: center; justify-content: center; margin: 8px 0; }
+  #shCv { touch-action: none; background: #f3f1ec; box-shadow: 0 6px 24px rgba(0,0,0,.6); }
+  #shText { display: flex; gap: 8px; margin-bottom: 6px; }
+  #shText input { flex: 1; min-width: 0; font-size: 16px; padding: 10px; border-radius: 10px; border: 1px solid #333; background: #1b1b1b; color: #fff; }
+  #shText button { flex: 0 0 auto; padding: 10px 14px; }
+  #shHint { color: #9fb8a8; font-size: 11px; margin-top: 6px; min-height: 14px; }
 </style>
 </head>
 <body>
@@ -66,6 +77,14 @@
   <div class="row" id="toolRow" hidden>
     <button id="modBtn" title="Doors, windows, glazing, verandahs, balustrades, columns; select, move and delete any part">MODIFY</button>
     <button id="intBtn" title="Walls, doors, stairs and lifts inside, floor by floor">INTERIOR</button>
+    <button id="drawBtn" title="Plan and section drawings, marked up and saved to Photos">DRAWINGS</button>
+  </div>
+  <div id="drawPanel" hidden>
+    <div class="row" id="drKind"></div>
+    <div class="row" id="drPlanRow"><button id="drLvDown" class="pm">▼</button><span class="val" id="drLvVal">GROUND</span><button id="drLvUp" class="pm">▲</button><button id="drSiteBtn" title="Show the site around the model in the plan">SITE OFF</button><button id="drDimsBtn" class="on">DIMS ON</button></div>
+    <div class="row" id="drSecRow"><input id="drPos" type="range" min="0.02" max="0.98" step="0.01" value="0.5"><button id="drRotBtn" class="pm" style="flex:0 0 52px" title="Turn the cut 45°">0°</button><button id="drFlipBtn" class="pm" style="flex:0 0 52px" title="Look at the cut from the other side">FLIP</button><button id="drDimsBtn2" class="on" style="flex:0 0 76px">DIMS ON</button></div>
+    <div class="row" id="drElevRow" hidden><button id="drSideBtn">NORTH SIDE</button><button id="drDimsBtn3" class="on">DIMS ON</button></div>
+    <div class="row"><button id="drMakeBtn" class="primary">MAKE DRAWING</button></div>
   </div>
   <div id="toolPanel" hidden>
     <div class="row scroll" id="modeRow"></div>
@@ -86,6 +105,13 @@
     <button id="elevBtn" hidden title="Photograph an elevation: wall height, roof and windows">ELEVATION</button>
     <button id="renderBtn" class="primary" disabled>PHOTOREAL RENDER</button>
   </div>
+</div>
+<div id="sheet" hidden>
+  <div class="row scroll" id="shTools"></div>
+  <div id="shWrap"><canvas id="shCv"></canvas></div>
+  <div id="shText" hidden><input id="shTextIn" placeholder="Note" autocomplete="off"><button id="shTextOk">ADD</button><button id="shTextNo">CANCEL</button></div>
+  <div class="row"><button id="shColBtn">RED</button><button id="shWBtn">MEDIUM</button><button id="shUndo">UNDO</button><button id="shSave" class="primary">SAVE TO PHOTOS</button><button id="shClose">CLOSE</button></div>
+  <div id="shHint"></div>
 </div>
 <script>/*__BUNDLE__*/</script>
 </body>

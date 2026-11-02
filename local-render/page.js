@@ -16,6 +16,7 @@ import { ColladaLoader } from "three/addons/loaders/ColladaLoader.js";
 import * as Engine from "./engine.js";
 import * as Builder from "./builder.js";
 import * as Drawings from "./drawings.js";
+import * as AutoDim from "./autodim.js";
 
 const PHOTO_EXPOSURE = 0.9, RASTER_EXPOSURE = 1.0, RASTER_SUN_GAIN = 2.2;
 const PHOTO_SAMPLES = 120;          // enough to converge on a phone; desktop uses ~150
@@ -588,7 +589,7 @@ function captureView() {
   post({ type: "result", dataUrl: renderer.domElement.toDataURL("image/jpeg", 0.92), samples: 0, clay: clayOn, realSun: !!siteInfo, quick: true });
 }
 function setBusy(b) {
-  for (const id of ["openBtn", "sketchBtn", "elevBtn", "winBtn", "clayBtn", "turnBtn", "spinBtn", "moveBtn", "renderBtn", "captureBtn", "time", "modBtn", "intBtn"]) $(id).disabled = b;
+  for (const id of ["openBtn", "sketchBtn", "elevBtn", "winBtn", "clayBtn", "turnBtn", "spinBtn", "moveBtn", "renderBtn", "captureBtn", "time", "modBtn", "intBtn", "drawBtn"]) $(id).disabled = b;
 }
 
 /* ---------------- a model built from a photographed sketch (desktop's Builder, on the phone) ---------------- */
@@ -1157,12 +1158,14 @@ function drawOverlay() {
 
 // ---- the tool rows under the model
 function setTool(which) {
-  const was = MOD.on ? "modify" : IN.on ? "interior" : null;
+  const was = MOD.on ? "modify" : IN.on ? "interior" : DR.on ? "drawings" : null;
+  if (DR.on) setDrawings(false);
   if (MOD.on) { MOD.on = false; pickPart(null); MOD.element = null; MOD.lastOp = null; showSnap(null); }
   if (IN.on) setInterior(false);
   if (which && which !== was) {
     if (which === "modify") { if (moveOn) setMove(false); MOD.on = true; status("MODIFY: " + MOD_HINT[MOD.mode]); }
     else if (which === "interior" && !setInterior(true)) which = null;
+    else if (which === "drawings") setDrawings(true);
   } else if (!which || which === was) status(siteStatus() || "Drag to orbit, pinch to zoom.");
   renderToolRows();
 }
@@ -1176,7 +1179,9 @@ const entries = o => Object.entries(o).map(([k, v]) => [k, (typeof v === "string
 function renderToolRows() {
   const has = !!modelRoot, tool = MOD.on ? "modify" : IN.on ? "interior" : null;
   $("toolRow").hidden = !has;
-  $("modBtn").classList.toggle("on", MOD.on); $("intBtn").classList.toggle("on", IN.on);
+  $("modBtn").classList.toggle("on", MOD.on); $("intBtn").classList.toggle("on", IN.on); $("drawBtn").classList.toggle("on", DR.on);
+  $("drawPanel").hidden = !DR.on; document.body.classList.toggle("drawing", DR.on);
+  if (DR.on) drRenderRows();
   $("intBtn").disabled = !sketchParams;
   $("styleRow").hidden = !sketchParams || !!tool;
   $("toolPanel").hidden = !tool;
@@ -1289,7 +1294,7 @@ function showDrawingModel(first) {
 
 let incomingDrawings = null;
 function resetTools() {
-  if (MOD.on || IN.on) setTool(null);
+  if (MOD.on || IN.on || DR.on) setTool(null);
   MOD.ops = []; MOD.undo = []; MOD.lastOp = null; MOD.element = null; MOD.picked = null; IN.undo = []; IN.sel = null; IN.chain = null; IN.level = 0;
   drawingModel = null; $("drawRow").hidden = true;
 }
@@ -1312,6 +1317,7 @@ function bindUi() {
   stepLabel();
   bindMove();
   bindTools();
+  drBind();
   $("renderBtn").onclick = renderPhoto;
   $("captureBtn").onclick = captureView;
   $("time").oninput = e => { holdFrame = false; hours = Number(e.target.value); applySun(); };
@@ -1437,3 +1443,301 @@ window.__mono = {
 };
 
 init();
+
+/* ---------------- Drawings: plan and section, marked up on the phone and saved to Photos ----------------
+   As desktop: a plan is the model alone unless SITE is on; a section shows the site (ground line, neighbours behind the
+   cut) and is framed on the building. The phone keeps to one drawing at a time and touch markup: pen, line, arrow,
+   cloud, text and dimensions that read true lengths (the drawing knows its metres per pixel). Sheets, hatches and title
+   blocks stay on desktop. */
+const DR = { on: false, kind: "plan", site: false, level: 0, pos: 0.5, ang: 0, flip: false, side: "N", dims: true };
+const DR_KINDS = [["plan", "PLAN"], ["section", "SECTION"], ["elev", "ELEVATION"], ["view", "3D VIEW"]];
+const DR_SIDES = { N: ["NORTH", [0, 0, 1]], E: ["EAST", [-1, 0, 0]], S: ["SOUTH", [0, 0, -1]], W: ["WEST", [1, 0, 0]] };
+function drBox() { modelRoot.updateMatrixWorld(true); return new THREE.Box3().setFromObject(modelRoot); }
+function drStorey() { return (sketchParams && sketchParams.storeyHeight) || 3; }
+function drLevels() { if (sketchParams) return Math.max(1, Builder.floorCount(sketchParams)); const b = drBox(); return Math.max(1, Math.round((b.max.y - b.min.y) / 3.2)); }
+function drCutY() { const b = drBox(); return Math.min(b.max.y - 0.05, b.min.y + DR.level * drStorey() + 1.2); }
+function drNormal() { const r = DR.ang * Math.PI / 180, n = new THREE.Vector3(Math.sin(r), 0, Math.cos(r)); return DR.flip ? n.negate() : n; }
+function drAlong(n, b) { let lo = Infinity, hi = -Infinity; for (const x of [b.min.x, b.max.x]) for (const z of [b.min.z, b.max.z]) { const d = x * n.x + z * n.z; lo = Math.min(lo, d); hi = Math.max(hi, d); } return [lo, hi]; }
+function drPlane() { const n = drNormal(), [lo, hi] = drAlong(n, drBox()); return new THREE.Plane().setFromNormalAndCoplanarPoint(n, n.clone().multiplyScalar(lo + (hi - lo) * DR.pos)); }
+// the live view shows where the drawing cuts
+function drPreview() {
+  if (!DR.on || !modelRoot) return;
+  renderer.localClippingEnabled = true;
+  modelClip = DR.kind === "section" ? [drPlane()] : DR.kind === "plan" ? [new THREE.Plane(new THREE.Vector3(0, -1, 0), drCutY())] : [];   // elevation and 3D view: whole
+  clipSynced = false; syncModelClip(); holdFrame = false;
+}
+function setDrawings(on) {
+  DR.on = on;
+  if (on) { if (moveOn) setMove(false); DR.level = Math.min(DR.level, drLevels() - 1); drPreview(); drHint(); }
+  else { modelClip = []; clipSynced = false; syncModelClip(); holdFrame = false; }
+}
+function drHint() {
+  status(DR.kind === "plan" ? `PLAN: cut 1.2 m above the ${Builder.levelName(DR.level).toLowerCase()}, the model on its own${DR.site ? " on its site" : ""}. MAKE DRAWING to mark it up and save it.`
+    : DR.kind === "section" ? "SECTION: slide to move the cut, turn or flip it. It shows the site, and the parts behind the cut. MAKE DRAWING to mark it up."
+    : DR.kind === "elev" ? `ELEVATION: the ${DR_SIDES[DR.side][0].toLowerCase()} side, flat and to scale, with the ground line. SIDE changes it. MAKE DRAWING to mark it up.`
+    : "3D VIEW: frame the view, then MAKE DRAWING to mark it up.");
+}
+function drRenderRows() {
+  seg("drKind", DR_KINDS, DR.kind, k => { DR.kind = k; drRenderRows(); drPreview(); drHint(); });
+  $("drPlanRow").hidden = DR.kind !== "plan"; $("drSecRow").hidden = DR.kind !== "section"; $("drElevRow").hidden = DR.kind !== "elev";
+  $("drSideBtn").textContent = DR_SIDES[DR.side][0] + " SIDE";
+  for (const id of ["drDimsBtn", "drDimsBtn2", "drDimsBtn3"]) { $(id).textContent = DR.dims ? "DIMS ON" : "DIMS OFF"; $(id).classList.toggle("on", DR.dims); }
+  $("drLvVal").textContent = Builder.levelName(DR.level).toUpperCase().replace(" FLOOR", "");
+  $("drSiteBtn").textContent = DR.site ? "SITE ON" : "SITE OFF"; $("drSiteBtn").classList.toggle("on", DR.site);
+  $("drRotBtn").textContent = DR.ang + "°"; $("drFlipBtn").classList.toggle("on", DR.flip);
+}
+function drEdges(planes) {
+  const g = new THREE.Group(), mat = new THREE.LineBasicMaterial({ color: 0x16160f, transparent: true, opacity: 0.88, clippingPlanes: planes });
+  modelRoot.traverse(n => {
+    if (!n.isMesh || !n.visible || !n.geometry || !n.geometry.attributes.position) return;
+    let eg; try { eg = new THREE.EdgesGeometry(n.geometry, 30); } catch { return; }
+    if (!eg.attributes.position.count) { eg.dispose(); return; }
+    const ls = new THREE.LineSegments(eg, mat); ls.matrixAutoUpdate = false; ls.matrix.copy(n.matrixWorld); g.add(ls);
+  });
+  return g;
+}
+const niceLen = v => [0.5, 1, 2, 5, 10, 20, 50, 100, 200, 500].find(x => x >= v) || 1000;
+// An orthographic drawing of the model: flat light, its own colours, black edges, on drawing paper.
+function drCapture() {
+  if (!modelRoot) return null;
+  if (DR.kind === "view") { renderer.render(scene, camera); return { url: renderer.domElement.toDataURL("image/jpeg", 0.92), mpp: null, name: "3D view" }; }
+  const b = drBox(), size = b.getSize(new THREE.Vector3()), ctr = b.getCenter(new THREE.Vector3());
+  let cam, W = 2048, H = 2048, mpp, plane, global = false, hide = [], name, north = false;
+  if (DR.kind === "plan") {
+    const span = Math.max(size.x, size.z) * (DR.site ? 1.8 : DR.dims ? 1.6 : 1.15) + (DR.site ? 20 : 2), y = drCutY();
+    cam = new THREE.OrthographicCamera(-span / 2, span / 2, span / 2, -span / 2, 0.1, size.y + 1200);
+    cam.position.set(ctr.x, b.max.y + 500, ctr.z); cam.up.set(0, 0, -1); cam.lookAt(ctr.x, y, ctr.z);
+    plane = new THREE.Plane(new THREE.Vector3(0, -1, 0), y); mpp = span / W; north = true;
+    if (!DR.site) hide = [site.ground, site.far, wideGroup, neighbours].filter(Boolean);
+    name = `Plan, ${Builder.levelName(DR.level).toLowerCase()}`;
+  } else if (DR.kind === "elev") {
+    const look = new THREE.Vector3(...DR_SIDES[DR.side][1]), t = new THREE.Vector3(-look.z, 0, look.x);
+    let tLo = Infinity, tHi = -Infinity, lLo = Infinity;
+    for (const x of [b.min.x, b.max.x]) for (const z of [b.min.z, b.max.z]) { const d = new THREE.Vector3(x - ctr.x, 0, z - ctr.z); tLo = Math.min(tLo, d.dot(t)); tHi = Math.max(tHi, d.dot(t)); lLo = Math.min(lLo, d.dot(look)); }
+    const halfW = (tHi - tLo) / 2 * (DR.dims ? 1.3 : 1.12) + 2, halfH = Math.max(size.y / 2 * (DR.dims ? 1.35 : 1.2) + 1.5, halfW * 0.3), cy = b.min.y + halfH * 0.78, dist = Math.max(halfW, halfH) * 3 + 100;
+    cam = new THREE.OrthographicCamera(-halfW, halfW, halfH, -halfH, Math.max(0.01, dist + lLo - 2), dist * 2 + Math.max(halfW, halfH) * 2);
+    cam.position.set(ctr.x, cy, ctr.z).addScaledVector(look, -dist); cam.up.set(0, 1, 0); cam.lookAt(ctr.x, cy, ctr.z);
+    H = Math.max(400, Math.round(W * halfH / halfW)); mpp = 2 * halfW / W; plane = null; hide = [site.ground, site.far, wideGroup];
+    name = `${DR_SIDES[DR.side][0].charAt(0) + DR_SIDES[DR.side][0].slice(1).toLowerCase()} elevation`;
+  } else {
+    plane = drPlane();
+    const n = plane.normal, t = new THREE.Vector3(-n.z, 0, n.x), [lo, hi] = drAlong(t, b);
+    const halfW = Math.max((hi - lo) / 2 * (DR.dims ? 1.35 : 1.15) + (siteInfo ? 8 : 0), 6), halfH = Math.max(size.y / 2 * (DR.dims ? 1.4 : 1.25), 6), cy = b.min.y + halfH * 0.8;
+    const p0 = plane.coplanarPoint(new THREE.Vector3()), pp = p0.addScaledVector(t, (lo + hi) / 2 - p0.dot(t)), dist = Math.max(halfW, halfH) * 3 + 100;
+    cam = new THREE.OrthographicCamera(-halfW, halfW, halfH, -halfH, 0.01, dist * 2 + Math.max(halfW, halfH) * 2);
+    cam.position.copy(pp).addScaledVector(n, -dist); cam.position.y = cy; cam.up.set(0, 1, 0); cam.lookAt(pp.x, cy, pp.z);
+    H = Math.max(400, Math.round(W * halfH / halfW)); mpp = 2 * halfW / W; global = true; hide = [site.ground, site.far, wideGroup];
+    name = `Section, ${DR.ang}° at ${Math.round(DR.pos * 100)}%`;
+  }
+  cam.updateProjectionMatrix(); cam.updateMatrixWorld(true);
+  // sections and elevations: the ground as a line with hatched earth below (the terrain along the drawing), sampled now
+  const tAx = new THREE.Vector3(1, 0, 0).applyQuaternion(cam.quaternion).setY(0).normalize();
+  const project = v => { const q = v.clone().project(cam); return [(q.x + 1) / 2 * W, (1 - q.y) / 2 * H]; };
+  let profile = null;
+  if (DR.kind !== "plan") {
+    const grounds = siteInfo ? [site.ground, ...wideGroup.children].filter(o => o && o.visible) : [];
+    const through = plane ? plane.coplanarPoint(new THREE.Vector3()) : ctr.clone(), c0 = cam.position.dot(tAx);
+    profile = AutoDim.groundProfile(grounds, tAx, through, c0 + cam.left - 1, c0 + cam.right + 1, b.min.y, 160)
+      .map(([u, yy]) => project(through.clone().addScaledVector(tAx, u - through.dot(tAx)).setY(yy)));
+  }
+  const local = (global || !plane) ? [] : [plane], swaps = new Map(), made = new Map();
+  modelRoot.traverse(m => {
+    if (!m.isMesh) return;
+    const conv = o => { if (!made.has(o)) made.set(o, new THREE.MeshLambertMaterial({ color: o.color ? o.color.clone() : 0xdddddd, map: o.map || null, transparent: !!o.transparent, opacity: o.opacity ?? 1, side: THREE.DoubleSide, clippingPlanes: local })); return made.get(o); };
+    swaps.set(m, m.material); m.material = Array.isArray(m.material) ? m.material.map(conv) : conv(m.material);
+  });
+  const edges = drEdges(local); scene.add(edges);
+  const was = { pr: renderer.getPixelRatio(), bg: scene.background, fog: scene.fog, sky: site.sky.visible, sh: renderer.shadowMap.enabled, hemi: hemi.intensity, sun: sun.intensity, tm: renderer.toneMapping, exp: renderer.toneMappingExposure, clip: renderer.clippingPlanes, hidden: hide.map(o => o.visible) };
+  hide.forEach(o => { o.visible = false; });
+  site.sky.visible = false; scene.background = new THREE.Color(0xf3f1ec); scene.fog = null; renderer.shadowMap.enabled = false;
+  hemi.intensity = 2.6; sun.intensity = 0; renderer.toneMapping = THREE.NoToneMapping; renderer.toneMappingExposure = 1;
+  renderer.localClippingEnabled = true; renderer.clippingPlanes = global ? [plane] : [];
+  if (DR.kind === "elev") scene.background = new THREE.Color(0xdfeaf2);
+  const cv = document.createElement("canvas"); cv.width = W; cv.height = H;
+  const g2 = cv.getContext("2d");
+  try {
+    renderer.setPixelRatio(1); renderer.setSize(W, H, false);
+    renderer.render(scene, cam);
+    g2.drawImage(renderer.domElement, 0, 0, W, H);
+  } finally {
+    scene.remove(edges); edges.children.forEach(l => l.geometry.dispose()); if (edges.children[0]) edges.children[0].material.dispose();
+    swaps.forEach((mat, m) => { m.material = mat; }); made.forEach(m => m.dispose());
+    hide.forEach((o, i) => { o.visible = was.hidden[i]; });
+    site.sky.visible = was.sky; scene.background = was.bg; scene.fog = was.fog; renderer.shadowMap.enabled = was.sh;
+    hemi.intensity = was.hemi; sun.intensity = was.sun; renderer.toneMapping = was.tm; renderer.toneMappingExposure = was.exp;
+    renderer.clippingPlanes = was.clip; renderer.setPixelRatio(was.pr); resize(); applySun(); drPreview();
+  }
+  if (profile) AutoDim.drawGround(g2, profile);
+  if (DR.dims) {
+    try {
+      const k = W / (cam.right - cam.left), corners = [];
+      for (const x of [b.min.x, b.max.x]) for (const yy of [b.min.y, b.max.y]) for (const z of [b.min.z, b.max.z]) corners.push(project(new THREE.Vector3(x, yy, z)));
+      const room = Math.max(0.8, Math.min(...corners.map(p => Math.min(p[0], W - p[0], p[1], H - p[1]))) / k);
+      const dims = DR.kind === "plan" ? AutoDim.planDims(modelRoot, plane.constant, { room }) : AutoDim.sideDims(modelRoot, tAx, plane, { room });
+      AutoDim.drawDims(g2, dims, project, k, { fontPx: Math.max(14, W * 0.011) });
+    } catch (e) { console.warn("auto dimensions", e); }
+  }
+  return { url: cv.toDataURL("image/png"), mpp, name, north, W, H };
+}
+// caption, scale bar and (plans) a north arrow, drawn onto the drawing itself
+async function drDecorate(d) {
+  if (!d.mpp) return d;
+  const im = await loadImg(d.url), c = document.createElement("canvas"); c.width = im.width; c.height = im.height;
+  const g = c.getContext("2d"), u = c.width / 1000;
+  g.drawImage(im, 0, 0);
+  g.fillStyle = "#1c1c1c"; g.strokeStyle = "#1c1c1c"; g.font = `700 ${16 * u}px -apple-system, Helvetica, sans-serif`; g.textBaseline = "alphabetic";
+  g.fillText(d.name.toUpperCase(), 24 * u, c.height - 24 * u);
+  const L = niceLen(c.width * 0.2 * d.mpp), px = L / d.mpp, x0 = c.width - 24 * u - px, y0 = c.height - 40 * u, h = 7 * u;
+  for (let i = 0; i < 5; i++) { g.fillStyle = i % 2 ? "#fff" : "#1c1c1c"; g.fillRect(x0 + i * px / 5, y0, px / 5, h); }
+  g.lineWidth = 1.2 * u; g.strokeRect(x0, y0, px, h);
+  g.fillStyle = "#1c1c1c"; g.font = `${12 * u}px -apple-system, Helvetica, sans-serif`; g.textAlign = "center";
+  g.fillText("0", x0, y0 + h + 16 * u); g.fillText(`${L} m`, x0 + px, y0 + h + 16 * u);
+  if (d.north) {   // the satellite ground is north up, so is the plan
+    const cx = c.width - 50 * u, cy = 64 * u, r = 22 * u;
+    g.beginPath(); g.arc(cx, cy, r, 0, Math.PI * 2); g.lineWidth = 1.5 * u; g.stroke();
+    g.beginPath(); g.moveTo(cx, cy - r * 1.05); g.lineTo(cx + r * 0.42, cy + r * 0.62); g.lineTo(cx, cy + r * 0.3); g.closePath(); g.fill();
+    g.font = `700 ${14 * u}px -apple-system, Helvetica, sans-serif`; g.fillText("N", cx, cy - r * 1.25);
+  }
+  return { ...d, url: c.toDataURL("image/png") };
+}
+const loadImg = src => new Promise((res, rej) => { const i = new Image(); i.onload = () => res(i); i.onerror = rej; i.src = src; });
+
+// ---- markup sheet
+const SH = { img: null, mpp: null, name: "", shapes: [], tool: "pen", ci: 0, wi: 1, cur: null, at: null, saved: true };
+const SH_TOOLS = [["pen", "PEN"], ["line", "LINE"], ["arrow", "ARROW"], ["cloud", "CLOUD"], ["text", "TEXT"], ["dim", "DIM"], ["erase", "ERASE"]];
+const SH_COLS = [["#d0021b", "RED"], ["#1c1c1c", "BLACK"], ["#1f5fa8", "BLUE"], ["#2E8B57", "GREEN"], ["#c47a1d", "ORANGE"]];
+const SH_WS = [[0.6, "FINE"], [1, "MEDIUM"], [1.8, "BOLD"]];
+async function openSheet(d) {
+  SH.img = await loadImg(d.url); SH.mpp = d.mpp; SH.name = d.name; SH.shapes = []; SH.cur = null; SH.saved = true;
+  $("sheet").hidden = false; shRows(); shLayout();
+}
+function shRows() {
+  const tools = SH.mpp ? SH_TOOLS : SH_TOOLS.filter(t => t[0] !== "dim");
+  seg("shTools", tools, SH.tool, k => { SH.tool = k; shRows(); });
+  $("shColBtn").textContent = SH_COLS[SH.ci][1]; $("shColBtn").style.color = SH_COLS[SH.ci][0] === "#1c1c1c" ? "#fff" : SH_COLS[SH.ci][0];
+  $("shWBtn").textContent = SH_WS[SH.wi][1];
+  $("shHint").textContent = { pen: "Draw freehand with a finger.", line: "Drag a line. It locks to 45° steps when close.", arrow: "Drag from the tail to the point.", cloud: "Drag a box to cloud a change.",
+    text: "Tap where the note goes, then type it.", dim: `Drag between two points: the length is measured on the drawing (${SH.mpp ? (SH.mpp * 1000).toFixed(0) + " mm a pixel" : ""}).`, erase: "Tap a mark to remove it." }[SH.tool];
+}
+function shLayout() {
+  const wrap = $("shWrap"), cv = $("shCv"), r = wrap.getBoundingClientRect(), a = SH.img.width / SH.img.height;
+  let w = r.width, h = w / a; if (h > r.height) { h = r.height; w = h * a; }
+  const dpr = Math.min(devicePixelRatio, 2);
+  cv.style.width = w + "px"; cv.style.height = h + "px"; cv.width = Math.round(w * dpr); cv.height = Math.round(h * dpr);
+  shDraw();
+}
+function shBase() { return SH.img.width * 0.0028; }   // a medium line, in drawing pixels
+function shPaint(g, k) {   // k: canvas pixels per drawing pixel
+  for (const s of SH.cur ? [...SH.shapes, SH.cur] : SH.shapes) {
+    const lw = shBase() * s.w * k, P = s.pts.map(([x, y]) => [x * k, y * k]);
+    g.strokeStyle = g.fillStyle = s.c; g.lineWidth = lw; g.lineCap = g.lineJoin = "round";
+    const line = (a, b) => { g.beginPath(); g.moveTo(a[0], a[1]); g.lineTo(b[0], b[1]); g.stroke(); };
+    if (s.t === "pen") { g.beginPath(); P.forEach((p, i) => i ? g.lineTo(p[0], p[1]) : g.moveTo(p[0], p[1])); g.stroke(); continue; }
+    const [a, b] = [P[0], P[P.length - 1]], dx = b[0] - a[0], dy = b[1] - a[1], len = Math.hypot(dx, dy) || 1, ux = dx / len, uy = dy / len;
+    if (s.t === "line") line(a, b);
+    else if (s.t === "arrow") {
+      line(a, b); const hl = Math.max(lw * 5, 14 * k), hw = hl * 0.4, bx = b[0] - ux * hl, by = b[1] - uy * hl;
+      g.beginPath(); g.moveTo(b[0], b[1]); g.lineTo(bx - uy * hw, by + ux * hw); g.lineTo(bx + uy * hw, by - ux * hw); g.closePath(); g.fill();
+    } else if (s.t === "dim") {
+      line(a, b); const t = Math.max(lw * 3, 8 * k);
+      for (const q of [a, b]) line([q[0] - (ux + uy) * t, q[1] - (uy - ux) * t], [q[0] + (ux + uy) * t, q[1] + (uy - ux) * t]);
+      const m = Math.hypot(s.pts[1][0] - s.pts[0][0], s.pts[1][1] - s.pts[0][1]) * SH.mpp, lab = m >= 100 ? m.toFixed(1) + " m" : Math.round(m * 1000).toString();
+      let ang = Math.atan2(dy, dx); if (ang > Math.PI / 2) ang -= Math.PI; if (ang <= -Math.PI / 2) ang += Math.PI;
+      g.save(); g.translate((a[0] + b[0]) / 2, (a[1] + b[1]) / 2); g.rotate(ang);
+      g.font = `700 ${SH.img.width * 0.016 * k}px -apple-system, Helvetica, sans-serif`; g.textAlign = "center"; g.textBaseline = "bottom";
+      g.fillText(lab, 0, -t * 0.6); g.restore();
+    } else if (s.t === "cloud") {
+      const x0 = Math.min(a[0], b[0]), y0 = Math.min(a[1], b[1]), x1 = Math.max(a[0], b[0]), y1 = Math.max(a[1], b[1]), C = [[x0, y0], [x1, y0], [x1, y1], [x0, y1]], arc = SH.img.width * 0.012 * k;
+      g.beginPath(); g.moveTo(x0, y0);
+      for (let e = 0; e < 4; e++) {
+        const p = C[e], q = C[(e + 1) % 4], l = Math.hypot(q[0] - p[0], q[1] - p[1]), n = Math.max(1, Math.round(l / arc)), sx = (q[0] - p[0]) / n, sy = (q[1] - p[1]) / n;
+        for (let j = 0; j < n; j++) { const mx = p[0] + sx * (j + 0.5), my = p[1] + sy * (j + 0.5), r = Math.hypot(sx, sy) / 2, st = Math.atan2(sy, sx); g.arc(mx, my, r, st + Math.PI, st, false); }
+      }
+      g.stroke();
+    } else if (s.t === "text") {
+      g.font = `700 ${SH.img.width * 0.022 * (0.7 + s.w * 0.3) * k}px -apple-system, Helvetica, sans-serif`; g.textAlign = "left"; g.textBaseline = "alphabetic";
+      g.fillText(s.text, a[0], a[1]);
+    }
+  }
+}
+function shDraw() {
+  const cv = $("shCv"), g = cv.getContext("2d"), k = cv.width / SH.img.width;
+  g.clearRect(0, 0, cv.width, cv.height); g.drawImage(SH.img, 0, 0, cv.width, cv.height); shPaint(g, k);
+}
+function shPt(e) { const r = $("shCv").getBoundingClientRect(), k = SH.img.width / r.width; return [(e.clientX - r.left) * k, (e.clientY - r.top) * k]; }
+// lines and dims lock to 45° steps when within 4° of one, which a finger needs
+function shLock(a, b) {
+  const dx = b[0] - a[0], dy = b[1] - a[1], l = Math.hypot(dx, dy), ang = Math.atan2(dy, dx), st = Math.round(ang / (Math.PI / 4)) * (Math.PI / 4);
+  return Math.abs(ang - st) < 4 * Math.PI / 180 ? [a[0] + Math.cos(st) * l, a[1] + Math.sin(st) * l] : b;
+}
+function shNear(p) {   // the topmost mark within a finger's reach
+  const r = SH.img.width * 0.025;
+  for (let i = SH.shapes.length - 1; i >= 0; i--) {
+    const s = SH.shapes[i], pts = s.t === "cloud" ? (([a, b]) => [a, [b[0], a[1]], b, [a[0], b[1]], a])(s.pts) : s.pts;
+    if (s.t === "text" && p[0] >= s.pts[0][0] - r && p[0] <= s.pts[0][0] + s.text.length * SH.img.width * 0.014 + r && Math.abs(p[1] - s.pts[0][1] + SH.img.width * 0.01) < r * 1.5) return i;
+    for (let j = 0; j < pts.length; j++) {
+      const a = pts[j], b = pts[Math.min(j + 1, pts.length - 1)], dx = b[0] - a[0], dy = b[1] - a[1], L2 = dx * dx + dy * dy, t = L2 ? Math.max(0, Math.min(1, ((p[0] - a[0]) * dx + (p[1] - a[1]) * dy) / L2)) : 0;
+      if (Math.hypot(p[0] - a[0] - dx * t, p[1] - a[1] - dy * t) < r) return i;
+    }
+  }
+  return -1;
+}
+function shBind() {
+  const cv = $("shCv");
+  cv.addEventListener("pointerdown", e => {
+    e.preventDefault(); const p = shPt(e);
+    if (SH.tool === "erase") { const i = shNear(p); if (i >= 0) { SH.erased = SH.shapes.slice(); SH.shapes.splice(i, 1); SH.saved = false; shDraw(); } return; }
+    if (SH.tool === "text") { SH.at = p; $("shText").hidden = false; $("shTextIn").value = ""; $("shTextIn").focus(); return; }
+    cv.setPointerCapture(e.pointerId);
+    SH.cur = { t: SH.tool, c: SH_COLS[SH.ci][0], w: SH_WS[SH.wi][0], pts: [p, p.slice()] };
+    if (SH.tool === "pen") SH.cur.pts = [p];
+    shDraw();
+  });
+  cv.addEventListener("pointermove", e => {
+    if (!SH.cur) return; const p = shPt(e);
+    if (SH.cur.t === "pen") { const q = SH.cur.pts[SH.cur.pts.length - 1]; if (Math.hypot(p[0] - q[0], p[1] - q[1]) > 2) SH.cur.pts.push(p); }
+    else SH.cur.pts[1] = SH.cur.t === "line" || SH.cur.t === "dim" ? shLock(SH.cur.pts[0], p) : p;
+    shDraw();
+  });
+  const end = () => {
+    if (!SH.cur) return;
+    const s = SH.cur, big = s.t === "pen" ? s.pts.length > 1 : Math.hypot(s.pts[1][0] - s.pts[0][0], s.pts[1][1] - s.pts[0][1]) > SH.img.width * 0.01;
+    SH.cur = null; if (big) { SH.shapes.push(s); SH.erased = null; SH.saved = false; } shDraw();
+  };
+  cv.addEventListener("pointerup", end); cv.addEventListener("pointercancel", end);
+  const addText = () => {
+    const t = $("shTextIn").value.trim(); $("shText").hidden = true; $("shTextIn").blur();
+    if (t && SH.at) { SH.shapes.push({ t: "text", text: t, c: SH_COLS[SH.ci][0], w: SH_WS[SH.wi][0], pts: [SH.at] }); SH.saved = false; shDraw(); }
+  };
+  $("shTextOk").onclick = addText; $("shTextNo").onclick = () => { $("shText").hidden = true; $("shTextIn").blur(); };
+  $("shTextIn").addEventListener("keydown", e => { if (e.key === "Enter") addText(); });
+  $("shColBtn").onclick = () => { SH.ci = (SH.ci + 1) % SH_COLS.length; shRows(); };
+  $("shWBtn").onclick = () => { SH.wi = (SH.wi + 1) % SH_WS.length; shRows(); };
+  $("shUndo").onclick = () => { if (SH.erased) { SH.shapes = SH.erased; SH.erased = null; } else if (SH.shapes.length) SH.shapes.pop(); shDraw(); };
+  $("shSave").onclick = () => {
+    const c = document.createElement("canvas"); c.width = SH.img.width; c.height = SH.img.height;
+    const g = c.getContext("2d"); g.drawImage(SH.img, 0, 0); shPaint(g, 1);
+    post({ type: "saveDrawing", dataUrl: c.toDataURL("image/jpeg", 0.93), name: SH.name });
+    $("shHint").textContent = "Saving to Photos…";
+  };
+  $("shClose").onclick = () => { $("sheet").hidden = true; drHint(); };
+  window.addEventListener("resize", () => { if (!$("sheet").hidden) shLayout(); });
+}
+function drBind() {
+  $("drawBtn").onclick = () => setTool("drawings");
+  $("drLvDown").onclick = () => { DR.level = Math.max(0, DR.level - 1); drRenderRows(); drPreview(); drHint(); };
+  $("drLvUp").onclick = () => { DR.level = Math.min(drLevels() - 1, DR.level + 1); drRenderRows(); drPreview(); drHint(); };
+  $("drSiteBtn").onclick = () => { DR.site = !DR.site; drRenderRows(); drHint(); };
+  $("drSideBtn").onclick = () => { DR.side = { N: "E", E: "S", S: "W", W: "N" }[DR.side]; drRenderRows(); drHint(); };
+  for (const id of ["drDimsBtn", "drDimsBtn2", "drDimsBtn3"]) $(id).onclick = () => { DR.dims = !DR.dims; drRenderRows(); status(DR.dims ? "Dimensions on: drawings come out dimensioned from the model." : "Dimensions off."); };
+  $("drPos").oninput = e => { DR.pos = Number(e.target.value); drPreview(); };
+  $("drRotBtn").onclick = () => { DR.ang = (DR.ang + 45) % 180; drRenderRows(); drPreview(); };
+  $("drFlipBtn").onclick = () => { DR.flip = !DR.flip; drRenderRows(); drPreview(); };
+  $("drMakeBtn").onclick = async () => {
+    if (!modelRoot) return;
+    status("Drawing…"); await nextFrame();
+    try { const d = drCapture(); if (d) await openSheet(await drDecorate(d)); drHint(); }
+    catch (e) { status("Couldn't make the drawing: " + (e && e.message || e)); }
+  };
+  shBind();
+}
