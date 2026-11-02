@@ -12,6 +12,7 @@
   button { flex: 1; min-width: 0; background: #222; color: #fff; border: 1px solid #333; border-radius: 12px; padding: 12px 4px; font-weight: 800; letter-spacing: .2px; font-size: 10px; }
   button[hidden], .row[hidden] { display: none; }
   button.pm { flex: 0 0 34px; padding: 12px 0; font-size: 14px; }
+  input.pos { flex: 1; min-width: 0; font-size: 16px; padding: 8px 6px; border-radius: 10px; border: 1px solid #333; background: #1b1b1b; color: #fff; }
   .val { flex: 0 0 auto; min-width: 34px; text-align: center; font-size: 10px; font-weight: 800; color: #cfe3d6; }
   button.on { background: #2E4D3A; border-color: #2E4D3A; }
   button.primary { background: #2E4D3A; border-color: #2E4D3A; }
@@ -65,6 +66,17 @@
     <span class="val">Y</span><button id="yDown" class="pm">−</button><button id="yUp" class="pm">+</button>
     <span class="val">Z</span><button id="zDown" class="pm">−</button><button id="zUp" class="pm">+</button>
     <button id="stepBtn">STEP 100 MM</button>
+  </div>
+  <div class="row" id="posRow" hidden>
+    <span class="val">X</span><input id="posX" class="pos" type="number" inputmode="decimal" step="0.01" aria-label="X east, metres">
+    <span class="val">Y</span><input id="posY" class="pos" type="number" inputmode="decimal" step="0.01" aria-label="Y up, metres">
+    <span class="val">Z</span><input id="posZ" class="pos" type="number" inputmode="decimal" step="0.01" aria-label="Z south, metres">
+  </div>
+  <div class="row" id="rotRow" hidden>
+    <button id="rotL" class="pm" title="Turn anticlockwise in plan">⟲</button><button id="rotR" class="pm" title="Turn clockwise in plan">⟳</button>
+    <span class="val">TILT</span><button id="tiltXm" class="pm">−</button><button id="tiltXp" class="pm">+</button>
+    <span class="val">SIDE</span><button id="tiltZm" class="pm">−</button><button id="tiltZp" class="pm">+</button>
+    <button id="rotStepBtn">15°</button><button id="levelBtn">LEVEL</button>
   </div>
   <div class="row" id="editRow" hidden>
     <button id="stDown" class="pm">−</button><span class="val" id="stVal">1 ST</span><button id="stUp" class="pm">+</button>

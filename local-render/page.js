@@ -181,6 +181,8 @@ function setModel(root) {
   if (modelRoot) scene.remove(modelRoot);
   origMats = new Map();
   modelRoot = new THREE.Group();
+  modelRoot.rotation.order = "YXZ";
+  fpCache = null;
   modelRoot.add(root);
   root.updateMatrixWorld(true);
   // Centre on the origin with the base on the ground, so the sun and ground sit around it.
@@ -243,7 +245,7 @@ function setMove(on) {
   controls.enabled = !moveOn;
   $("moveBtn").classList.toggle("on", moveOn);
   renderToolRows();
-  if (moveOn) status("MOVE: drag the model to its place on the site, or move it exactly with X (east), Y (up) and Z (south). Tap MOVE again to orbit.");
+  if (moveOn) { showPlacement(); status("MOVE: drag the model to its place, type an exact X (east), Y (up), Z (south), or turn and tilt it below. LEVEL takes the tilt out. Tap MOVE again to orbit."); }
   else status(siteStatus() || "");
 }
 function bindMove() {
@@ -257,7 +259,7 @@ function bindMove() {
     camera.position.x += p.x - dragFrom.x; camera.position.z += p.z - dragFrom.z;
     dragFrom = groundPoint(e);
   });
-  const end = () => { if (dragFrom) { dragFrom = null; placeModel(); applySun(); buildNeighbours(); } };
+  const end = () => { if (dragFrom) { dragFrom = null; placeModel(); applySun(); buildNeighbours(); showPlacement(); } };
   c.addEventListener("pointerup", end); c.addEventListener("pointercancel", end);
 }
 
@@ -272,7 +274,7 @@ function nudge(ax, sign) {
   if (ax === "y") yLift += d;
   else { modelRoot.position[ax] += d; controls.target[ax] += d; camera.position[ax] += d; moved[ax] += d; }
   placeModel(); applySun(); buildNeighbours();
-  status(`Moved x ${moved.x.toFixed(2)} m · y ${yLift.toFixed(2)} m · z ${moved.z.toFixed(2)} m`);
+  showPlacement();
 }
 function stepLabel() { const v = STEPS[stepI]; $("stepBtn").textContent = "STEP " + (v < 1 ? Math.round(v * 1000) + " MM" : v + " M"); }
 
@@ -283,6 +285,41 @@ function spin(deg) {
   modelRoot.rotation.y += deg * Math.PI / 180;
   placeModel();
   buildNeighbours();
+  showPlacement();
+}
+// Free rotate, as on desktop: turn in plan, tilt front-back (about the model's own x) and side-side (its own z),
+// in exact steps; LEVEL takes the tilt out and keeps the turn. YXZ order keeps rotation.y the plan turn.
+const ROT_STEPS = [1, 5, 15, 45, 90];
+let rotI = 2;
+function rotateBy(axis, deg) {
+  holdFrame = false;
+  if (!modelRoot) return;
+  modelRoot.rotation[axis] += deg * Math.PI / 180;
+  placeModel(); applySun(); buildNeighbours(); showPlacement();
+}
+function levelModel() {
+  if (!modelRoot) return;
+  holdFrame = false;
+  modelRoot.rotation.x = 0; modelRoot.rotation.z = 0;
+  placeModel(); applySun(); buildNeighbours(); showPlacement();
+}
+const deg1 = r => (Math.round(r * 1800 / Math.PI) / 10 || 0).toFixed(1);
+// The model's place on the site: x east and z south from where it first landed, y the lift above the ground.
+function showPlacement() {
+  if (!modelRoot) return;
+  const r = modelRoot.rotation;
+  for (const [k, v] of [["posX", modelRoot.position.x], ["posY", yLift], ["posZ", modelRoot.position.z]]) if (document.activeElement !== $(k)) $(k).value = v.toFixed(3);
+  status(`At x ${modelRoot.position.x.toFixed(2)} m · y ${yLift.toFixed(2)} m · z ${modelRoot.position.z.toFixed(2)} m · turned ${deg1(-r.y)}° · tilt ${deg1(r.x)}° / ${deg1(r.z)}°`);
+}
+function setPlacement() {
+  if (!modelRoot) return;
+  holdFrame = false;
+  const x = +$("posX").value || 0, y = +$("posY").value || 0, z = +$("posZ").value || 0;
+  const dx = x - modelRoot.position.x, dz = z - modelRoot.position.z;
+  modelRoot.position.x = x; modelRoot.position.z = z; yLift = y;
+  controls.target.x += dx; controls.target.z += dz; camera.position.x += dx; camera.position.z += dz;
+  moved.x += dx; moved.z += dz;
+  placeModel(); applySun(); buildNeighbours(); showPlacement();
 }
 function turn(dir) {
   holdFrame = false;
@@ -478,6 +515,59 @@ async function traceMaps() {
   traced = near.concat(far).filter(b => !(b.area > 2500));
   return traced;
 }
+// The model's real plan footprint (same as desktop): every triangle rasterised onto a 0.25 m grid in the model's own
+// space, so moving or turning it only re-transforms the points. fpCache = null when the model or its parts change.
+const FP_CELL = 0.25, NB_CLEAR = 1.0;
+let fpCache = null;
+function footprintLocal() {
+  if (fpCache) return fpCache;
+  const cells = new Set(), inv = new THREE.Matrix4().copy(modelRoot.matrixWorld).invert(), m = new THREE.Matrix4();
+  const a = new THREE.Vector3(), b = new THREE.Vector3(), c = new THREE.Vector3();
+  const mark = (x, z) => cells.add(Math.round(x / FP_CELL) + "," + Math.round(z / FP_CELL));
+  const edge = (p, q) => { const n = Math.max(1, Math.ceil(Math.hypot(q.x - p.x, q.z - p.z) / FP_CELL)); for (let i = 0; i <= n; i++) mark(p.x + (q.x - p.x) * i / n, p.z + (q.z - p.z) * i / n); };
+  modelRoot.updateMatrixWorld(true);
+  modelRoot.traverse(o => {
+    if (!o.isMesh || !o.visible || !o.geometry || !o.geometry.attributes.position) return;
+    m.multiplyMatrices(inv, o.matrixWorld);
+    const P = o.geometry.attributes.position, I = o.geometry.index, n = I ? I.count : P.count;
+    for (let t = 0; t + 2 < n; t += 3) {
+      a.fromBufferAttribute(P, I ? I.getX(t) : t).applyMatrix4(m);
+      b.fromBufferAttribute(P, I ? I.getX(t + 1) : t + 1).applyMatrix4(m);
+      c.fromBufferAttribute(P, I ? I.getX(t + 2) : t + 2).applyMatrix4(m);
+      edge(a, b); edge(b, c); edge(c, a);
+      const x0 = Math.min(a.x, b.x, c.x), x1 = Math.max(a.x, b.x, c.x), z0 = Math.min(a.z, b.z, c.z), z1 = Math.max(a.z, b.z, c.z);
+      if ((x1 - x0) < 2 * FP_CELL && (z1 - z0) < 2 * FP_CELL) continue;
+      const d = (b.z - c.z) * (a.x - c.x) + (c.x - b.x) * (a.z - c.z); if (Math.abs(d) < 1e-9) continue;
+      for (let gx = Math.ceil(x0 / FP_CELL); gx * FP_CELL <= x1; gx++) for (let gz = Math.ceil(z0 / FP_CELL); gz * FP_CELL <= z1; gz++) {
+        const x = gx * FP_CELL, z = gz * FP_CELL;
+        const l1 = ((b.z - c.z) * (x - c.x) + (c.x - b.x) * (z - c.z)) / d, l2 = ((c.z - a.z) * (x - c.x) + (a.x - c.x) * (z - c.z)) / d;
+        if (l1 >= 0 && l2 >= 0 && l1 + l2 <= 1) cells.add(gx + "," + gz);
+      }
+    }
+  });
+  fpCache = [...cells].map(k => k.split(",").map(v => +v * FP_CELL));
+  return fpCache;
+}
+function footprintWorld() {
+  modelRoot.updateMatrixWorld(true);
+  const v = new THREE.Vector3(), pts = [];
+  let x0 = 1e9, x1 = -1e9, z0 = 1e9, z1 = -1e9;
+  for (const [x, z] of footprintLocal()) {
+    v.set(x, 0, z).applyMatrix4(modelRoot.matrixWorld); pts.push([v.x, v.z]);
+    x0 = Math.min(x0, v.x); x1 = Math.max(x1, v.x); z0 = Math.min(z0, v.z); z1 = Math.max(z1, v.z);
+  }
+  return { pts, x0, x1, z0, z1 };
+}
+function distToPoly(px, pz, pts) {
+  let inside = false, best = 1e9;
+  for (let i = 0, j = pts.length - 1; i < pts.length; j = i++) {
+    const [xi, zi] = pts[i], [xj, zj] = pts[j];
+    if ((zi > pz) !== (zj > pz) && px < (xj - xi) * (pz - zi) / (zj - zi) + xi) inside = !inside;
+    const dx = xj - xi, dz = zj - zi, L = dx * dx + dz * dz, t = L ? Math.max(0, Math.min(1, ((px - xi) * dx + (pz - zi) * dz) / L)) : 0;
+    best = Math.min(best, Math.hypot(px - (xi + t * dx), pz - (zi + t * dz)));
+  }
+  return inside ? 0 : best;
+}
 // Serialised: the OSM reply, the two Apple maps, MOVE and SPIN can all ask for a rebuild at nearly the same time.
 let nbQueue = Promise.resolve();
 function buildNeighbours() { nbQueue = nbQueue.then(buildNeighboursNow, buildNeighboursNow); return nbQueue; }
@@ -505,14 +595,16 @@ async function buildNeighboursNow() {
   }
   if (neighbours) { scene.remove(neighbours); neighbours.traverse(o => o.geometry && o.geometry.dispose()); }
   neighbours = new THREE.Group();
-  let box = null;
-  if (modelRoot) { modelRoot.updateMatrixWorld(true); box = new THREE.Box3().setFromObject(modelRoot).expandByScalar(4); }
+  const fp = modelRoot ? footprintWorld() : null;
   let n = 0, withH = 0, nMap = 0;
   for (const b of nbFoot) {
-    if (box) {   // anything overlapping the user's own building is the existing building it replaces
+    // left out only if it comes within NB_CLEAR of the model itself in plan (the map's trace of the building the model
+    // replaces). The model's bounding box + 4 m, as before, took out whole streets around a long fence or a turned model.
+    if (fp && fp.pts.length) {
       let x0 = 1e9, x1 = -1e9, z0 = 1e9, z1 = -1e9;
       for (const [x, z] of b.pts) { x0 = Math.min(x0, x); x1 = Math.max(x1, x); z0 = Math.min(z0, z); z1 = Math.max(z1, z); }
-      if (x1 >= box.min.x && x0 <= box.max.x && z1 >= box.min.z && z0 <= box.max.z) continue;
+      if (x1 + NB_CLEAR >= fp.x0 && x0 - NB_CLEAR <= fp.x1 && z1 + NB_CLEAR >= fp.z0 && z0 - NB_CLEAR <= fp.z1
+          && fp.pts.some(([x, z]) => x >= x0 - NB_CLEAR && x <= x1 + NB_CLEAR && z >= z0 - NB_CLEAR && z <= z1 + NB_CLEAR && distToPoly(x, z, b.pts) < NB_CLEAR)) continue;
     }
     const shape = new THREE.Shape(b.pts.map(([x, z]) => new THREE.Vector2(x, -z)));
     for (const hole of b.holes || []) shape.holes.push(new THREE.Path(hole.map(([x, z]) => new THREE.Vector2(x, -z))));
@@ -530,7 +622,7 @@ async function buildNeighboursNow() {
   }
   scene.add(neighbours);
   nbSummary = n ? `${n} neighbouring buildings (${nMap ? `${n - nMap} from OpenStreetMap, ${nMap} traced from Apple Maps; ` : "OpenStreetMap; "}${withH} with real heights, the rest assumed one storey)` : "no neighbouring buildings mapped";
-  status(siteStatus());
+  if (moveOn) showPlacement(); else status(siteStatus());   // while placing, keep the placement readout up
 }
 function siteStatus() {
   if (!siteInfo) return "";
@@ -668,7 +760,7 @@ function addParts(list) {
   });
   partsChanged();
 }
-function partsChanged() { holdFrame = false; snapCache = new WeakMap(); applyClay(); retintPicked(); placeModel(); }
+function partsChanged() { holdFrame = false; snapCache = new WeakMap(); fpCache = null; applyClay(); retintPicked(); placeModel(); buildNeighbours(); }
 const originalMaterial = (mesh, mi) => { const m = origMats.get(mesh) || mesh.material; return Array.isArray(m) ? (m[mi || 0] || m[0]) : m; };
 const built = () => modelRoot && modelRoot.children[0];
 const isUnder = (o, g) => { for (; o; o = o.parent) if (o === g) return true; return false; };
@@ -1186,6 +1278,7 @@ function renderToolRows() {
   $("styleRow").hidden = !sketchParams || !!tool;
   $("toolPanel").hidden = !tool;
   $("nudgeRow").hidden = !(moveOn || tool);
+  $("posRow").hidden = $("rotRow").hidden = !moveOn;
   document.body.classList.toggle("tooling", !!tool);
   if (!tool) return;
   if (MOD.on) {
@@ -1311,6 +1404,12 @@ function bindUi() {
   $("clayBtn").onclick = () => { holdFrame = false; clayOn = !clayOn; applyClay(); };
   $("turnBtn").onclick = () => turn(-1);
   $("spinBtn").onclick = () => spin(-45);
+  $("rotL").onclick = () => rotateBy("y", ROT_STEPS[rotI]); $("rotR").onclick = () => rotateBy("y", -ROT_STEPS[rotI]);
+  $("tiltXm").onclick = () => rotateBy("x", -ROT_STEPS[rotI]); $("tiltXp").onclick = () => rotateBy("x", ROT_STEPS[rotI]);
+  $("tiltZm").onclick = () => rotateBy("z", -ROT_STEPS[rotI]); $("tiltZp").onclick = () => rotateBy("z", ROT_STEPS[rotI]);
+  $("rotStepBtn").onclick = () => { rotI = (rotI + 1) % ROT_STEPS.length; $("rotStepBtn").textContent = ROT_STEPS[rotI] + "°"; };
+  $("levelBtn").onclick = levelModel;
+  for (const k of ["posX", "posY", "posZ"]) $(k).onchange = setPlacement;
   $("moveBtn").onclick = () => setMove(!moveOn);
   for (const ax of ["x", "y", "z"]) { $(ax + "Down").onclick = () => nudge(ax, -1); $(ax + "Up").onclick = () => nudge(ax, 1); }
   $("stepBtn").onclick = () => { stepI = (stepI + 1) % STEPS.length; stepLabel(); };
