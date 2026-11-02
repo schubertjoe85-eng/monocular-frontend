@@ -1448,6 +1448,8 @@ window.__mono = {
     if (siteInfo) status(siteStatus());
   },
   setRing(meters, b64) { if (siteInfo) setRing(meters, b64); },
+  // a progress or result line from React Native (the AI Model Builder runs there, on the user's own keys)
+  say(text) { status(String(text || "")); },
   // d: { n, half, step, z: number[] } in metres relative to the site; which: "near" (2 km) or "far" (30 km)
   setDem(which, d) {
     if (!siteInfo || !d) return;

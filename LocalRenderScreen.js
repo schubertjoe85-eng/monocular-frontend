@@ -13,7 +13,7 @@
 //   RN -> page: window.__mono.setSite / modelBegin / modelChunk / modelEnd / drawingsBegin / drawingsChunk / drawingsEnd
 
 import React, { useRef, useState } from "react";
-import { View, Text, TextInput, TouchableOpacity, ActivityIndicator, Image, Modal, ScrollView, StyleSheet } from "react-native";
+import { View, Text, TextInput, TouchableOpacity, ActivityIndicator, Image, Modal, ScrollView, StyleSheet, Alert } from "react-native";
 import * as ImagePicker from "expo-image-picker";
 import { readSketch, readDrawingSet } from "./modules/monocular-site";
 import { WebView } from "react-native-webview";
@@ -21,6 +21,8 @@ import * as DocumentPicker from "expo-document-picker";
 import * as FileSystem from "expo-file-system";
 import * as MediaLibrary from "expo-media-library";
 import localRenderHtml from "./localRenderHtml";
+import * as ModelBuilder from "./ai/modelbuilder";
+import { loadKeys } from "./cloudApi";
 import { geocodeAddress, satelliteFor, standardMapFor, fetchOsmText, fetchDem, SITE_METERS, RING_METERS } from "./site";
 
 const MODEL_EXTS = ["glb", "gltf", "obj", "dae"];
@@ -144,6 +146,49 @@ export default function LocalRenderScreen({ site, address = "", onSiteFound, onR
     }
   }
 
+  // AI Model Builder, as on desktop: GPT reads every sheet into a building spec, Claude checks it against the drawings,
+  // and plain code (ai/modelspec.js) writes the .dae, which opens here like any model. On request only, as it spends
+  // the user's own OpenAI / Anthropic credit; the PDF goes from this phone straight to them.
+  const AI_MAX_PDF = 24 * 1024 * 1024;   // both providers cap a request near 32 MB, and base64 adds a third
+  const say = t => inject(`window.__mono.say(${JSON.stringify(t)});`);
+  async function aiBuildFromPdf(uri, name, size) {
+    const k = await loadKeys(), keys = { openai: (k.openAi || "").trim(), anthropic: (k.anthropic || "").trim() };
+    try { ModelBuilder.pickModels(keys); } catch (e) { setError(e.message); return; }
+    if (size && size > AI_MAX_PDF) { setError(`${name} is ${(size / 1048576).toFixed(0)} MB; the AI services take up to 24 MB. Save just the plans, elevations and sections as a smaller PDF.`); return; }
+    setSending(true); setError("");
+    const t0 = Date.now();
+    try {
+      say("Preparing the drawings…");
+      const data = await FileSystem.readAsStringAsync(uri, { encoding: FileSystem.EncodingType.Base64 });
+      const http = async (url, headers, body) => { const r = await fetch(url, { method: "POST", headers, body }); return { ok: r.ok, status: r.status, body: await r.text() }; };
+      const r = await ModelBuilder.runBuild({ files: [{ name, mime: "application/pdf", data }], keys, http,
+        log: (stage, msg) => say(`AI Model Builder: ${msg}… (a minute or two — keep Monocular open)`) });
+      const base = (r.spec.name || name.replace(/\.pdf$/i, "") || "AI model").replace(/[\\/:*?"<>|]/g, "").slice(0, 60) || "AI model";
+      const out = FileSystem.cacheDirectory + base.replace(/\s+/g, "-") + ".dae";
+      await FileSystem.writeAsStringAsync(out, r.dae);
+      await sendModel(out, base + ".dae");
+      const openings = r.spec.walls.reduce((n, w) => n + w.openings.length, 0);
+      const who = r.models.interpret.provider === r.models.rationalise.provider
+        ? (r.models.interpret.provider === "anthropic" ? "Claude" : "GPT") + " read and checked the drawings"
+        : `${r.models.interpret.provider === "openai" ? "GPT" : "Claude"} read the drawings, ${r.models.rationalise.provider === "anthropic" ? "Claude" : "GPT"} checked them`;
+      setTimeout(() => say(`${who} in ${Math.round((Date.now() - t0) / 1000)} s: ${r.spec.levels.length} level${r.spec.levels.length > 1 ? "s" : ""}, ${r.spec.walls.length} walls, ${openings} doors and windows. `
+        + (r.report.ok ? "Every check passed." : `${r.report.errors.length} problem${r.report.errors.length > 1 ? "s" : ""} left: ${r.report.errors.map(e => e.msg).slice(0, 3).join(" · ")}.`)
+        + ((r.spec.assumptions || []).length ? ` Assumed: ${r.spec.assumptions.slice(0, 3).join(" · ")}.` : "")), 1500);
+    } catch (e) {
+      setError("AI Model Builder couldn't build: " + (e.message || e));
+    } finally {
+      setSending(false);
+    }
+  }
+  // A PDF can be read two ways: the phone's own vector reader (free, offline) or the AI Model Builder (own keys).
+  function askPdf(asset, name) {
+    Alert.alert("Drawing set", "How should Monocular read this PDF?", [
+      { text: "Read on this phone", onPress: () => sendDrawings(asset.uri, name).catch(e => setError(String(e.message || e))) },
+      { text: "Build with AI (your keys)", onPress: () => aiBuildFromPdf(asset.uri, name, asset.size) },
+      { text: "Cancel", style: "cancel" },
+    ]);
+  }
+
   async function pickModel() {
     setError("");
     try {
@@ -155,7 +200,7 @@ export default function LocalRenderScreen({ site, address = "", onSiteFound, onR
       const asset = result.assets[0];
       const name = asset.name || "model";
       const ext = name.split(".").pop().toLowerCase();
-      if (ext === "pdf") { await sendDrawings(asset.uri, name); return; }
+      if (ext === "pdf") { askPdf(asset, name); return; }
       if (!MODEL_EXTS.includes(ext)) { setError("Unsupported file. Use .dae, .glb, .obj or a PDF drawing set."); return; }
       if (asset.size && asset.size > MAX_MODEL_BYTES) { setError("That model is over 80 MB — too large to render on a phone."); return; }
 
