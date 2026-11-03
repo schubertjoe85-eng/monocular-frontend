@@ -1,15 +1,75 @@
-Pilot Live Map Support
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Pilot Live Map · Support</title>
+<meta name="description" content="Help for Pilot Live Map, the iPhone app for live planes, official emergency incidents and space stations worldwide. Data sources, coverage, notifications and contact.">
+<link rel="canonical" href="https://monocular-frontend.vercel.app/pilot-support.html">
+<meta name="apple-itunes-app" content="app-id=6811035364">
+<meta name="theme-color" content="#08111f">
+<link rel="icon" type="image/png" href="pilot-icon.png">
+<link rel="apple-touch-icon" href="pilot-icon.png">
+<meta property="og:type" content="website">
+<meta property="og:site_name" content="Pilot Live Map">
+<meta property="og:title" content="Pilot Live Map · Support">
+<meta property="og:description" content="Help for Pilot Live Map, the iPhone app for live planes, official emergency incidents and space stations worldwide. Data sources, coverage, notifications and contact.">
+<meta property="og:url" content="https://monocular-frontend.vercel.app/pilot-support.html">
+<meta property="og:image" content="https://monocular-frontend.vercel.app/pilot-og.png">
+<meta property="og:image:width" content="1200">
+<meta property="og:image:height" content="630">
+<meta property="og:image:alt" content="Pilot: live planes, incidents and space, worldwide">
+<meta name="twitter:card" content="summary_large_image">
+<meta name="twitter:title" content="Pilot Live Map · Support">
+<meta name="twitter:description" content="Help for Pilot Live Map, the iPhone app for live planes, official emergency incidents and space stations worldwide. Data sources, coverage, notifications and contact.">
+<meta name="twitter:image" content="https://monocular-frontend.vercel.app/pilot-og.png">
+<script type="application/ld+json">
+{"@context":"https://schema.org","@type":"MobileApplication","name":"Pilot Live Map","operatingSystem":"iOS","applicationCategory":"TravelApplication","description":"Live planes, official emergency incidents and space stations, worldwide. Spot a plane and look it up in a tap.","url":"https://apps.apple.com/app/id6811035364","image":"https://monocular-frontend.vercel.app/pilot-icon.png","offers":{"@type":"Offer","price":"0.49","priceCurrency":"AUD"},"author":{"@type":"Person","name":"Joe Schubert"}}
+</script>
+<style>
+  :root { --navy:#08111f; --lift:#0f1f33; --radar:#4ade80; --blip:#38bdf8; --ink:#dbeef2; --dim:#8ca5b3; }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--navy); color: var(--ink); font: 16px/1.6 -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; }
+  main { max-width: 760px; margin: 0 auto; padding: 32px 16px 64px; }
+  header { display: flex; align-items: center; gap: 12px; margin-bottom: 24px; }
+  .mark { width: 40px; height: 40px; border-radius: 50%; background: radial-gradient(circle, var(--blip) 0 9%, transparent 10%), repeating-radial-gradient(circle, transparent 0 8px, rgba(74,222,128,.35) 8px 9px), var(--navy); border: 1px solid rgba(74,222,128,.4); }
+  h1 { font-size: 1.6rem; margin: 0; letter-spacing: .04em; }
+  h1 small { display: block; font: 600 .7rem ui-monospace, Menlo, monospace; color: var(--radar); letter-spacing: .15em; }
+  h2 { font-size: 1.05rem; color: var(--radar); margin-top: 1.6rem; }
+  section { background: var(--lift); border: 1px solid rgba(74,222,128,.25); border-radius: 14px; padding: 4px 20px 16px; margin-top: 16px; }
+  a { color: var(--blip); }
+  .dim { color: var(--dim); font-size: .9rem; }
+</style>
+</head>
+<body>
+<main>
+  <header><div class="mark" aria-hidden="true"></div><h1>PILOT <small>SUPPORT</small></h1></header>
 
-Pilot shows live aircraft, weather radar and cloud cover, and emergency incidents across Australia on a single map.
+  <p>Pilot is a live map of aircraft, official emergency incidents and weather, worldwide. Spot a plane overhead and tap it to look it up.</p>
 
-Frequently asked questions:
+  <section>
+    <h2>The status says STALE, or nothing is moving</h2>
+    <p>The strip at the top shows how many seconds ago aircraft and incidents last updated. Aircraft refresh every 10 seconds and incidents every minute. If it says STALE, check your internet connection, then tap the refresh button at the bottom right.</p>
 
-- The map is blank or layers aren't loading: check your internet connection and try the Refresh button. Live data refreshes automatically every 30 seconds.
-- Weather card not showing: zoom in on an area (weather only appears once you're zoomed in close enough on a location).
-- Location permission: Pilot only uses your location on-device to centre the map; it is never sent anywhere.
+    <h2>No aircraft where I am</h2>
+    <p>Aircraft come from a community network of ADS-B receivers. Coverage is very good around cities and airports and thinner over remote land and oceans. Aircraft that aren't broadcasting ADS-B, or are out of range of a receiver, won't appear.</p>
 
-For any other issue, feedback, or question, contact:
+    <h2>Which incidents are shown?</h2>
+    <p>Worldwide: GDACS disaster alerts, USGS earthquakes and NASA natural events. In Australia: ACT, NSW, Victoria, Queensland and WA emergency services. In the USA: National Weather Service alerts. In the UK: Environment Agency flood warnings. In New Zealand: GeoNet earthquakes. Regional services load when the map is over their area. Tap ⓘ Sources in the app for the full list.</p>
 
-schubertjoe85@gmail.com
+    <h2>Notifications</h2>
+    <p>Pilot alerts you when a new incident starts within 25 km of you, or an aircraft squawks an emergency code, while the app is open. Allow notifications when asked, or later in Settings &gt; Notifications &gt; Pilot.</p>
 
-Last Updated: September 2026
+    <h2>Location</h2>
+    <p>Location centres the map and measures distances. It stays on your iPhone. See the <a href="pilot-privacy.html">privacy policy</a>.</p>
+  </section>
+
+  <section>
+    <h2>Contact</h2>
+    <p>Problems, feedback or a data source you'd like added: <a href="mailto:schubertjoe85@gmail.com">schubertjoe85@gmail.com</a>.</p>
+  </section>
+
+  <p class="dim">Pilot is for information only and isn't an official warning service. In an emergency call your local emergency number (000 in Australia, 911 in North America, 112 in Europe, 999 in the UK, 111 in New Zealand). Last updated: 3 November 2026.</p>
+</main>
+</body>
+</html>
