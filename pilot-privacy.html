@@ -1,23 +1,68 @@
-Pilot Live Map Privacy Policy
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Pilot Live Map · Privacy Policy</title>
+<style>
+  :root { --navy:#08111f; --lift:#0f1f33; --radar:#4ade80; --blip:#38bdf8; --ink:#dbeef2; --dim:#8ca5b3; }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--navy); color: var(--ink); font: 16px/1.6 -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; }
+  main { max-width: 760px; margin: 0 auto; padding: 32px 16px 64px; }
+  header { display: flex; align-items: center; gap: 12px; margin-bottom: 24px; }
+  .mark { width: 40px; height: 40px; border-radius: 50%; background: radial-gradient(circle, var(--blip) 0 9%, transparent 10%), repeating-radial-gradient(circle, transparent 0 8px, rgba(74,222,128,.35) 8px 9px), var(--navy); border: 1px solid rgba(74,222,128,.4); }
+  h1 { font-size: 1.6rem; margin: 0; letter-spacing: .04em; }
+  h1 small { display: block; font: 600 .7rem ui-monospace, Menlo, monospace; color: var(--radar); letter-spacing: .15em; }
+  h2 { font-size: 1.05rem; color: var(--radar); margin-top: 2rem; }
+  section { background: var(--lift); border: 1px solid rgba(74,222,128,.25); border-radius: 14px; padding: 4px 20px 16px; margin-top: 16px; }
+  ul { padding-left: 1.2rem; } li { margin: .35rem 0; }
+  a { color: var(--blip); }
+  .dim { color: var(--dim); font-size: .9rem; }
+</style>
+</head>
+<body>
+<main>
+  <header><div class="mark" aria-hidden="true"></div><h1>PILOT <small>PRIVACY POLICY</small></h1></header>
 
-Pilot does not require an account and does not collect or store any personal information on a server.
+  <p>Pilot Live Map ("Pilot") is made by Joe Schubert. Pilot has no account, no advertising, no analytics and no tracking, and it does not send any information to us.</p>
 
-- Location: if you grant permission, your device's location is used only on-device to centre the map. It is never transmitted to us or stored.
-- No account, email, or payment information is collected.
-- No user data is sold or shared with third parties, and none is used for advertising or tracking.
+  <section>
+    <h2>What Pilot uses on your iPhone</h2>
+    <ul>
+      <li><b>Your location</b>, if you allow it: used on your iPhone to centre the map, measure distances to aircraft and incidents, and decide when a new incident is within 25 km. It is not stored by Pilot and is never sent to us.</li>
+      <li><b>Notifications</b>, if you allow them: alerts are created on your iPhone by Pilot itself. No push service or server is involved.</li>
+    </ul>
+  </section>
 
-Pilot displays live public data fetched directly from third-party providers as you use the map:
+  <section>
+    <h2>What leaves your iPhone</h2>
+    <p>To show live data, Pilot asks public data services for the area you are looking at. These requests go directly from your iPhone to each service; none of them go through us. Because the map usually starts where you are, <b>the coordinates of the area you are viewing can be close to your location</b>, and like any internet request each service can see your device's IP address. Pilot sends no name, account or device identifier.</p>
+    <ul>
+      <li><b>adsb.lol</b>: the centre and radius of the map, to get aircraft positions.</li>
+      <li><b>hexdb.io</b>: the ICAO address of an aircraft you tap, to get its type and operator.</li>
+      <li><b>MET Norway</b>: the map centre (rounded to 4 decimal places), to get the weather forecast.</li>
+      <li><b>Apple</b>: map tiles, place names, Look Around imagery and location services, under <a href="https://www.apple.com/legal/privacy/">Apple's privacy policy</a>.</li>
+      <li><b>Official incident services</b> (GDACS, USGS, NASA EONET, ACT ESA, NSW RFS, Emergency Management Victoria, Queensland Fire Department, WA DFES, U.S. National Weather Service, UK Environment Agency, GeoNet): Pilot downloads their public lists of current incidents. No location is sent to them.</li>
+    </ul>
+    <p>Each service handles requests under its own privacy policy. Links you open (an official incident page, Planespotters.net, FlightAware) open in your browser under that site's policy.</p>
+  </section>
 
-- OpenSky Network, for live aircraft positions.
-- Open-Meteo, for weather conditions and forecasts.
-- RainViewer, for radar imagery.
-- OpenWeatherMap, for cloud cover imagery.
-- ACT Emergency Services Agency and NSW Rural Fire Service, for public emergency incident feeds.
+  <section>
+    <h2>Aircraft owners</h2>
+    <p>Pilot shows the registered owner of an aircraft only when the owner is an organisation, such as an airline, operator or government. It does not show the names of private individuals.</p>
+  </section>
 
-These requests go directly from your device to each provider and are subject to that provider's own privacy policy.
+  <section>
+    <h2>Children</h2>
+    <p>Pilot does not knowingly collect any information from anyone, including children.</p>
+  </section>
 
-If you have questions regarding privacy, contact:
+  <section>
+    <h2>Your rights and contact</h2>
+    <p>Because Pilot holds no personal information about you, there is nothing for us to access, correct or delete. You can stop location use at any time in Settings &gt; Privacy &amp; Security &gt; Location Services &gt; Pilot. Questions: <a href="mailto:schubertjoe85@gmail.com">schubertjoe85@gmail.com</a>.</p>
+  </section>
 
-schubertjoe85@gmail.com
-
-Last Updated: September 2026
+  <p class="dim">Pilot is for information only. In an emergency call your local emergency number and follow the advice of the emergency services. Last updated: 3 November 2026.</p>
+</main>
+</body>
+</html>
